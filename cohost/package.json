@@ -1,0 +1,42 @@
+{
+  "name": "cohost-w6w",
+  "version": "0.1.0",
+  "description": "Cohost app for w6w — order triggers (placed / changed) and a get-order action. Replaces the legacy runtime-server + workflows.",
+  "license": "MIT",
+  "author": { "name": "Cohost", "url": "https://cohost.vip" },
+  "homepage": "https://cohost.vip",
+  "repository": "https://github.com/cohostvip/cohost-w6w",
+  "keywords": ["cohost", "w6w", "events", "ticketing", "orders", "webhooks"],
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@w6w/types": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0"
+  },
+  "w6w": {
+    "id": "vip.cohost.w6w",
+    "displayName": "Cohost",
+    "description": "React to Cohost order events and fetch order details by id or URN.",
+    "categories": ["commerce", "marketing"],
+    "appearance": {
+      "icon": { "url": "./assets/icon.svg", "alt": "Cohost" },
+      "brandColor": "#f97316",
+      "darkMode": {
+        "icon": { "url": "./assets/icon-dark.svg", "alt": "Cohost" }
+      }
+    },
+    "network": { "allow": ["api.cohost.vip"] },
+    "entry": "./index.ts"
+  }
+}
