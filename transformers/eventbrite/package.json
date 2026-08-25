@@ -1,0 +1,42 @@
+{
+  "name": "eventbrite-transformer-w6w",
+  "version": "0.1.0",
+  "description": "w6w transformer app — map Eventbrite objects (events, ticket classes, orders) to/from Cohost objects. Pure, offline shape conversions.",
+  "license": "MIT",
+  "author": { "name": "Cohost", "url": "https://cohost.vip" },
+  "homepage": "https://cohost.vip",
+  "repository": "https://github.com/cohostvip/w6w-transformers",
+  "keywords": ["cohost", "w6w", "eventbrite", "transformer", "events", "ticketing", "orders", "migration"],
+  "private": false,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@w6w/types": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0"
+  },
+  "w6w": {
+    "id": "vip.cohost.transformers.eventbrite",
+    "displayName": "Eventbrite ⇄ Cohost",
+    "description": "Transform Eventbrite events, ticket classes, and orders to and from Cohost objects.",
+    "categories": ["commerce", "migration", "transformer"],
+    "appearance": {
+      "icon": { "url": "./assets/icon.svg", "alt": "Eventbrite ⇄ Cohost" },
+      "brandColor": "#f05537",
+      "darkMode": {
+        "icon": { "url": "./assets/icon-dark.svg", "alt": "Eventbrite ⇄ Cohost" }
+      }
+    },
+    "network": { "allow": [] },
+    "entry": "./index.ts"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "manifestVersion": "1",
+  "kind": "pack",
+  "name": "cohost",
+  "displayName": "Cohost",
+  "description": "Cohost integrations for w6w: the Cohost app (orders, events, tickets, checkout, organizers, users — a 1:1 mirror of the public @cohostvip/cohost-node SDK) plus source-format transformers between Cohost and third-party platforms.",
+  "version": "0.1.0",
+  "apps": [
+    { "path": "./cohost" },
+    { "path": "./transformers/eventbrite" }
+  ]
+}
