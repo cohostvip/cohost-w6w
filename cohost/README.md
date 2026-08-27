@@ -1,13 +1,19 @@
 # Cohost w6w App
 
 A [w6w](https://github.com/w6w-io/w6w-core) App for [Cohost](https://cohost.vip). It
-exposes Cohost order **events** as triggers and the whole public Cohost API as
+exposes Cohost order **events** as triggers and Cohost's **backend-ops** API as
 **actions**, so workflows can both react to and drive Cohost on the w6w runtime.
 
-The action set is a 1:1 mirror of the endpoints published by the
+The action set mirrors the backend-ops slice of the endpoints published by the
 [`@cohostvip/cohost-node`](https://www.npmjs.com/package/@cohostvip/cohost-node) SDK —
-39 endpoints across events, tickets, orders, cart sessions, coupons, organizers and
-users. When an endpoint is added to that SDK, add an action here.
+27 endpoints across events, tickets, orders, coupons, organizers and users. When a
+backend-ops endpoint is added to that SDK, add an action here.
+
+Cart-session/checkout endpoints (`start-cart-session`, `update-cart-item`,
+`apply-cart-coupon`, `process-cart-payment`, `place-cart-order`, etc.) are
+deliberately **not** actions here — they exist to drive a live checkout from the
+Node/React SDK in the browser, one HTTP round-trip per user keystroke, not
+something a backend workflow orchestrates. w6w is for backend ops.
 
 It replaces the two legacy runtime-server workflows:
 
@@ -82,29 +88,6 @@ resulting order fields for editor autocomplete.
 | `list-order-attendees` | `GET /orders/{id}/attendees` |
 | `send-order-confirmation` | `POST /orders/{id}/send-confirmation` |
 
-### Cart sessions — checkout (`resource: cart`)
-
-| Key | Endpoint |
-| --- | --- |
-| `start-cart-session` | `POST /cart/sessions` |
-| `get-cart-session` | `GET /cart/sessions/{id}` |
-| `update-cart-session` | `PATCH /cart/sessions/{id}` |
-| `cancel-cart-session` | `DELETE /cart/sessions/{id}` |
-| `update-cart-item` | `POST /cart/sessions/{id}/item` |
-| `pre-validate-cart-payment` | `POST /cart/sessions/{id}/payment/pre-validate` |
-| `create-cart-payment-intent` | `POST /cart/sessions/{id}/payment/payment-intent` |
-| `process-cart-payment` | `POST /cart/sessions/{id}/payment/process` |
-| `place-cart-order` | `POST /cart/sessions/{id}/place-order` |
-| `join-cart-table` | `POST /cart/sessions/{id}/join-table` |
-| `apply-cart-coupon` | `POST /cart/sessions/{id}/coupons` |
-| `remove-cart-coupon` | `DELETE /cart/sessions/{id}/coupons/{couponId}` |
-
-The happy path is start → `update-cart-item` → `pre-validate-cart-payment` →
-`create-cart-payment-intent` → `process-cart-payment` → `place-cart-order`.
-`update-cart-item` sets an **absolute** quantity, so `quantity: 0` removes an item —
-that is why there is no separate remove-item action (the SDK's `deleteItem` is a
-wrapper over the same endpoint, not an endpoint of its own).
-
 ### Coupons (`resource: coupon`)
 
 | Key | Endpoint |
@@ -152,12 +135,11 @@ addressable by key:
 - endpoints that answer with a **bare array** (`list-event-tickets`,
   `list-order-attendees`, `list-coupons`) are wrapped as `{ results }`;
   `list-organizers` re-keys the API's `{ organizers }` to `{ results }` for the same reason.
-- `DELETE` endpoints, which return no content, report `{ deleted: true, id }`
-  (`cancel-cart-session` reports `{ cancelled: true, id }`).
+- `DELETE` endpoints, which return no content, report `{ deleted: true, id }`.
 
 Body wrapping is **not** uniform across the API and the actions follow it faithfully:
 events wrap (`{ event }`, `{ ticket }` / `{ tickets }`), organizers wrap
-(`{ organizer }`), coupons and cart sessions send flat bodies.
+(`{ organizer }`), coupons send flat bodies.
 
 ## Auth
 

@@ -1,7 +1,8 @@
 /**
  * App-manifest invariants. These guard the property that matters most about the
- * action set: it is a faithful, non-colliding mirror of the 39 endpoints the
- * Cohost Node SDK publishes (catalogued in `.claude/docs/SDK_ENDPOINTS.md`).
+ * action set: it is a faithful, non-colliding mirror of the backend-ops endpoints
+ * the Cohost Node SDK publishes (catalogued in `.claude/docs/SDK_ENDPOINTS.md`) —
+ * the cart-session/checkout endpoints are deliberately excluded, see `index.ts`.
  */
 import { expect, test } from "vitest";
 import app from "../index.ts";
@@ -11,8 +12,8 @@ test("action keys are unique", () => {
   expect(new Set(keys).size).toBe(keys.length);
 });
 
-test("one action per SDK endpoint", () => {
-  expect(app.actions).toHaveLength(39);
+test("one action per backend-ops SDK endpoint", () => {
+  expect(app.actions).toHaveLength(27);
 });
 
 test("every action is fully declared", () => {
@@ -51,9 +52,6 @@ test("actions that create or send are not marked idempotent", () => {
     "create-event-tickets",
     "create-coupon",
     "create-organizer",
-    "start-cart-session",
-    "process-cart-payment",
-    "place-cart-order",
     "send-order-confirmation",
   ];
   for (const key of unsafe) {

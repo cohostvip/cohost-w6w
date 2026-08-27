@@ -25,20 +25,6 @@ import getOrder from "./actions/get-order.ts";
 import listOrderAttendees from "./actions/list-order-attendees.ts";
 import sendOrderConfirmation from "./actions/send-order-confirmation.ts";
 
-// Cart sessions (checkout)
-import startCartSession from "./actions/start-cart-session.ts";
-import getCartSession from "./actions/get-cart-session.ts";
-import updateCartSession from "./actions/update-cart-session.ts";
-import cancelCartSession from "./actions/cancel-cart-session.ts";
-import updateCartItem from "./actions/update-cart-item.ts";
-import preValidateCartPayment from "./actions/pre-validate-cart-payment.ts";
-import createCartPaymentIntent from "./actions/create-cart-payment-intent.ts";
-import processCartPayment from "./actions/process-cart-payment.ts";
-import placeCartOrder from "./actions/place-cart-order.ts";
-import joinCartTable from "./actions/join-cart-table.ts";
-import applyCartCoupon from "./actions/apply-cart-coupon.ts";
-import removeCartCoupon from "./actions/remove-cart-coupon.ts";
-
 // Coupons
 import listCoupons from "./actions/list-coupons.ts";
 import createCoupon from "./actions/create-coupon.ts";
@@ -62,10 +48,17 @@ import listUsers from "./actions/list-users.ts";
  *
  * Triggers are how workflows *start* (`order-placed`, `order-changed`,
  * `order-confirmation-requested`); actions are how they read and write
- * Cohost. The action set is a 1:1 mirror of the public API surface published
- * by `@cohostvip/cohost-node` — 39 endpoints, catalogued in
- * `.claude/docs/SDK_ENDPOINTS.md`. Adding an endpoint there means adding an
- * action here.
+ * Cohost. The action set mirrors the **backend-ops** slice of the public API
+ * surface published by `@cohostvip/cohost-node` — events, tickets, orders,
+ * coupons, organizers and users — catalogued in
+ * `.claude/docs/SDK_ENDPOINTS.md`. Adding a backend-ops endpoint there means
+ * adding an action here.
+ *
+ * The cart-session/checkout endpoints (`start-cart-session`,
+ * `update-cart-item`, `apply-cart-coupon`, `process-cart-payment`, etc.) are
+ * deliberately NOT mirrored: they exist to drive a live checkout from the
+ * Node/React SDK in the browser, one HTTP round-trip per user keystroke —
+ * not something a backend workflow orchestrates. w6w is for backend ops.
  *
  * All three triggers register a real webhook subscription via
  * `onSubscribe`/`onUnsubscribe` (`POST`/`DELETE /v1/webhooks`) and enrich the
@@ -106,19 +99,6 @@ export default {
     getOrder,
     listOrderAttendees,
     sendOrderConfirmation,
-    // cart
-    startCartSession,
-    getCartSession,
-    updateCartSession,
-    cancelCartSession,
-    updateCartItem,
-    preValidateCartPayment,
-    createCartPaymentIntent,
-    processCartPayment,
-    placeCartOrder,
-    joinCartTable,
-    applyCartCoupon,
-    removeCartCoupon,
     // coupons
     listCoupons,
     createCoupon,
