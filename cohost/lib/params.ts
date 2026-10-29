@@ -106,23 +106,6 @@ export const orderOutput: OutputField[] = [
   { key: "costs", type: "object", label: "Costs" },
 ];
 
-export const cartSessionOutput: OutputField[] = [
-  { key: "id", type: "string", label: "Cart Session ID" },
-  { key: "status", type: "string", label: "Status" },
-  { key: "paymentStatus", type: "string", label: "Payment Status" },
-  { key: "contextId", type: "string", label: "Context ID" },
-  { key: "currency", type: "string", label: "Currency" },
-  { key: "organizerId", type: "string", label: "Organizer ID" },
-  { key: "companyId", type: "string", label: "Company ID" },
-  { key: "orderId", type: "string", label: "Order ID" },
-  { key: "orderNumber", type: "string", label: "Order Number" },
-  { key: "uid", type: "string", label: "User ID" },
-  { key: "customer", type: "object", label: "Customer" },
-  { key: "items", type: "array", label: "Items" },
-  { key: "costs", type: "object", label: "Costs" },
-  { key: "coupons", type: "array", label: "Coupons" },
-];
-
 export const couponOutput: OutputField[] = [
   { key: "id", type: "string", label: "Coupon ID" },
   { key: "code", type: "string", label: "Code" },
