@@ -34,6 +34,7 @@ export interface EbCurrency {
 }
 
 export interface EbEvent {
+  ticket_classes?: EbTicketClass[] | null;
   id?: string;
   name?: EbText;
   summary?: string | null;
@@ -133,6 +134,9 @@ export type CohostEventStatus =
   | "canceled";
 
 export interface CohostEvent {
+  urn?: string;
+  /** Expanded Eventbrite ticket classes, mapped to Cohost tickets when present. */
+  tickets?: CohostTicket[];
   id?: string;
   name: string;
   summary: string;
@@ -157,6 +161,7 @@ export interface CohostEvent {
 export type CohostTicketStatus = "live" | "hidden" | "sold-out" | "draft" | "archived";
 
 export interface CohostTicket {
+  urn?: string;
   id?: string;
   name: string;
   display_name?: string;
@@ -211,6 +216,7 @@ export interface CohostOrderCosts {
 export type CohostOrderStatus = "placed" | "voided" | "refunded";
 
 export interface CohostOrder {
+  urn?: string;
   id?: string;
   orderNumber?: string;
   status: CohostOrderStatus;
