@@ -1,16 +1,14 @@
 import type { ConversionContext } from "./context.ts";
 
-/** Validate source metadata independently of the resource being converted. */
+/** Validate source identity independently of the resource being converted. */
 export function validateConversionContext(context: ConversionContext): void {
   if (!context || typeof context !== "object") {
-    throw new TypeError("context: Expected source invocation metadata.");
+    throw new TypeError("context: Expected source identity.");
   }
-  for (const key of ["companyId", "app", "version", "action", "connectionId"] as const) {
+  for (const key of ["companyId", "connectionId"] as const) {
     if (typeof context[key] !== "string" || !context[key].trim()) {
       throw new TypeError(`context.${key}: Expected a non-empty string.`);
     }
-  }
-  for (const key of ["companyId", "connectionId"] as const) {
     if (!/^[A-Za-z0-9._-]+$/.test(context[key])) {
       throw new TypeError(`context.${key}: Expected letters, digits, dots, underscores, or hyphens.`);
     }
@@ -22,7 +20,6 @@ export function validateConversionContext(context: ConversionContext): void {
  * urn:1:<companyId>:<connectionId>:<resourcePath>
  *
  * The company owns the resource; the connection identifies its service.
- * App, app version, and action are invocation metadata, not resource identity.
  * Pass a canonical absolute path with each resource ID encoded as one segment.
  */
 export function generateUrn(resourcePath: string, context: ConversionContext): string {

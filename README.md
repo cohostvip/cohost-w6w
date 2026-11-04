@@ -21,7 +21,7 @@ field), `index.ts` (default export of an `AppDefinition`), `actions/`,
 `auth/`, `assets/icon.svg`, and its own `tsconfig.json` / `tests/`.
 
 `shared/` holds dependency-free TypeScript utilities reused by apps and file
-builders. `shared/context.ts` defines source invocation metadata, and
+builders. `shared/context.ts` defines the source company + connection context, and
 `shared/urn.ts` generates stable company/connection-scoped URNs before upload:
 
 ```ts
@@ -29,17 +29,14 @@ import { generateUrn } from "./shared/urn.ts";
 
 generateUrn("/events/1000000000001", {
   companyId: "company_test_eventbrite",
-  app: "io.w6w.eventbrite",
-  version: "0.4.2",
-  action: "get-event",
   connectionId: "conn_test_example",
 });
 // urn:1:company_test_eventbrite:conn_test_example:/events/1000000000001
 ```
 
-The company ID is required and identifies the resource owner. App, version, and
-action describe the invocation and do not affect resource identity. The company
-ID in this example is synthetic; supply the owning company's ID for real data.
+The company ID identifies the resource owner and the connection ID its source;
+both are required. The company ID in this example is synthetic; supply the owning
+company's ID for real data.
 
 ## Develop
 
@@ -49,6 +46,19 @@ Each app manages its own dependencies and test suite:
 cd cohost && npm install && npm run check && npm test
 cd transformers/eventbrite && npm install && npm run check && npm test
 ```
+
+## Build
+
+Each app's `npm run build` bundles `index.ts` into a single ESM file at its `main`
+(`dist/app.js`). `scripts/build.mjs` runs `w6w build app` (test → build → describe) on every app
+in `w6w-pack.json`:
+
+```bash
+node scripts/build.mjs -o out     # → out/index.json + out/<app-id>/<version>/{manifest.json,app.js}
+node scripts/build.mjs --cli ../w6w/packages/wrappers/cli/dist/bin/w6w.js -o out
+```
+
+The CLI is `--cli` / `W6W_CLI`, else `w6w` on `PATH`. Run `npm install` in each app first.
 
 ## License
 
