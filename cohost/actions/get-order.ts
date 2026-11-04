@@ -1,8 +1,9 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 
 interface Input {
-  /** Order id or URN — passed straight through to the API. */
+  /** Order id or URN — converted to an ID before calling the API. */
   order: string;
   /** Optional user id, forwarded as `?uid=` for auth context. */
   uid?: string;
@@ -50,7 +51,7 @@ const getOrder: ActionDefinition<Input> = {
   async execute(input, ctx) {
     ctx.log("info", "fetching order", { order: input.order });
     const client = new CohostClient(ctx);
-    return client.request(`/orders/${encodeURIComponent(input.order)}`, {
+    return client.request(`/orders/${encodeURIComponent(resourceId(input.order, "orders"))}`, {
       query: { uid: input.uid },
     });
   },

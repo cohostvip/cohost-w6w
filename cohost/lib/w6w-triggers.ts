@@ -10,7 +10,17 @@
  * DELETE THIS FILE once `@w6w/types` exports `TriggerDefinition` and includes
  * `triggers` on `AppDefinition`, and import those from `@w6w/types` instead.
  */
-import type { HookContext, Output, Param } from "@w6w/types";
+import type { DynamicOutput, HookContext, OutputField as BaseOutputField, Param } from "@w6w/types";
+
+/**
+ * `OutputField` with `items` — the fields of ONE element of an array field (keys relative to the
+ * element). Upstream since w6w's declared-output-shapes change, not yet in `@w6w/types@0.1.0`.
+ */
+export interface OutputField extends BaseOutputField {
+  items?: OutputField[];
+}
+
+export type Output = OutputField[] | DynamicOutput;
 
 /** A Trigger's serializable configuration — its metadata minus the hook functions. */
 export interface Trigger {

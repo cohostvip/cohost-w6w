@@ -34,7 +34,7 @@ test("order-placed: handleIngest fetches the full order from the ping's resource
   const order = { id: "ord_abc", status: "placed", orderNumber: "CH-100245" };
   const { ctx, calls } = mockCtx([{ body: order }]);
   const events = await orderPlaced.handleIngest(
-    { raw: PING, params: {}, state: { webhookId: "wh_1" }, subscriptionId: "sub_1" },
+    { raw: { body: PING }, params: {}, state: { webhookId: "wh_1" }, subscriptionId: "sub_1" },
     ctx,
   );
   expect(calls[0].method).toBe("GET");

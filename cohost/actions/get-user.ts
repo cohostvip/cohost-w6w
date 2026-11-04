@@ -1,5 +1,6 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 
 interface Input {
   user: string;
@@ -21,7 +22,7 @@ const getUser: ActionDefinition<Input> = {
   title: "Get User Profile",
   description: "Fetch a Cohost user's channel profile.",
   params: [
-    { key: "user", label: "User ID", type: "string", required: true },
+    { key: "user", label: "User (ID or URN)", type: "string", required: true },
     {
       key: "channelId",
       label: "Channel ID",
@@ -48,7 +49,7 @@ const getUser: ActionDefinition<Input> = {
   async execute(input, ctx) {
     ctx.log("info", "fetching user profile", { user: input.user, channelId: input.channelId });
     const client = new CohostClient(ctx);
-    return client.request(`/users/${encodeURIComponent(input.user)}`, {
+    return client.request(`/users/${encodeURIComponent(resourceId(input.user, "users"))}`, {
       headers: { "x-cohost-channel-id": input.channelId },
     });
   },

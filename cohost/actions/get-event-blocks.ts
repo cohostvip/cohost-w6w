@@ -1,5 +1,6 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 
 interface Input {
   event: string;
@@ -25,7 +26,7 @@ const getEventBlocks: ActionDefinition<Input> = {
   async execute(input, ctx) {
     ctx.log("info", "fetching event blocks", { event: input.event });
     const client = new CohostClient(ctx);
-    return client.request(`/events/${encodeURIComponent(input.event)}/blocks`);
+    return client.request(`/events/${encodeURIComponent(resourceId(input.event, "events"))}/blocks`);
   },
 };
 

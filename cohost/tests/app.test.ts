@@ -13,7 +13,21 @@ test("action keys are unique", () => {
 });
 
 test("one action per backend-ops SDK endpoint", () => {
-  expect(app.actions).toHaveLength(27);
+  // The `format` actions are local conversions and the `urn` actions read private
+  // endpoints — neither is an SDK endpoint.
+  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(28);
+});
+
+test("every fetch action takes a friendly flag, off by default", () => {
+  for (const action of app.actions) {
+    const flag = action.params?.find((p) => p.key === "friendly");
+    if (action.type === "read" || action.type === "search") {
+      expect(flag, `${action.key} has the friendly flag`).toMatchObject({ type: "boolean", default: false });
+      expect(flag?.required, `${action.key} friendly flag is optional`).toBeFalsy();
+    } else {
+      expect(flag, `${action.key} has no friendly flag`).toBeUndefined();
+    }
+  }
 });
 
 test("every action is fully declared", () => {

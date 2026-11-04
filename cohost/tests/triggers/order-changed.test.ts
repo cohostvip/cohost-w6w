@@ -35,7 +35,7 @@ test("order-changed: handleIngest fetches the full order from the ping's resourc
   const order = { id: "ord_abc", status: "changed", orderNumber: "CH-100245" };
   const { ctx, calls } = mockCtx([{ body: order }]);
   const events = await orderChanged.handleIngest(
-    { raw: PING, params: {}, state: { webhookId: "wh_2" }, subscriptionId: "sub_2" },
+    { raw: { body: PING }, params: {}, state: { webhookId: "wh_2" }, subscriptionId: "sub_2" },
     ctx,
   );
   expect(calls[0].method).toBe("GET");

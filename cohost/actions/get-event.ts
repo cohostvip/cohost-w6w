@@ -1,9 +1,10 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 import { eventOutput } from "../lib/params.ts";
 
 interface Input {
-  /** Event id or URN — passed straight through to the API. */
+  /** Event id or URN — converted to an ID before calling the API. */
   event: string;
 }
 
@@ -22,7 +23,7 @@ const getEvent: ActionDefinition<Input> = {
   async execute(input, ctx) {
     ctx.log("info", "fetching event", { event: input.event });
     const client = new CohostClient(ctx);
-    return client.request(`/events/${encodeURIComponent(input.event)}`);
+    return client.request(`/events/${encodeURIComponent(resourceId(input.event, "events"))}`);
   },
 };
 
