@@ -1,17 +1,18 @@
 import { cohostEventToEventbrite } from "./events.ts";
 import { cohostOrderToEventbrite } from "./orders.ts";
 import { cohostTicketToEventbrite } from "./tickets.ts";
-import type { CohostEvent, CohostOrder, CohostTicket, EbEvent, EbOrder, EbTicketClass } from "./types.ts";
+import type { CohostEvent, CohostOrder, CohostTicket, EbEventInput, EbOrder, EbTicketClassInput } from "./types.ts";
 
 type Kind = "event" | "ticket" | "order";
 type JsonObject = Record<string, unknown>;
 type Pagination = { pagination?: JsonObject };
-type EbObject = EbEvent | EbTicketClass | EbOrder;
+/** Event and ticket class write inputs; orders stay Eventbrite read shapes (Eventbrite has no order writes). */
+type EbObject = EbEventInput | EbTicketClassInput | EbOrder;
 
 export type CohostToEventbriteResult =
   | EbObject
-  | ({ events: EbEvent[] } & Pagination)
-  | ({ ticket_classes: EbTicketClass[] } & Pagination)
+  | ({ events: EbEventInput[] } & Pagination)
+  | ({ ticketClasses: EbTicketClassInput[] } & Pagination)
   | ({ orders: EbOrder[] } & Pagination)
   | ({ results: CohostToEventbriteResult[] } & Pagination)
   | CohostToEventbriteResult[];
@@ -52,8 +53,8 @@ function mapObject(value: JsonObject, kind: Kind, fallbackCurrency: string, path
       const event = cohostEventToEventbrite({ ...value, currency } as CohostEvent);
       if (value.tickets != null) {
         if (!Array.isArray(value.tickets)) fail(`${path}.tickets`, "Expected an array.");
-        event.ticket_classes = value.tickets.map((ticket, index) =>
-          resolveObject(ticket, currency, `${path}.tickets[${index}]`, "ticket") as EbTicketClass,
+        event.ticketClasses = value.tickets.map((ticket, index) =>
+          resolveObject(ticket, currency, `${path}.tickets[${index}]`, "ticket") as EbTicketClassInput,
         );
       }
       return event;
@@ -72,7 +73,14 @@ function mapObject(value: JsonObject, kind: Kind, fallbackCurrency: string, path
   }
 }
 
+/** Eventbrite → Cohost emits `{ type, urn, data }`; accept it as-is so results round-trip. */
+function unwrap(value: unknown): unknown {
+  return isObject(value) && typeof value.urn === "string" && isObject(value.data) &&
+    (value.type === "event" || value.type === "ticket" || value.type === "order") ? value.data : value;
+}
+
 function resolveObject(value: unknown, currency: string, path: string, expected: Kind): EbObject {
+  value = unwrap(value);
   if (!isObject(value)) fail(path, "Expected a Cohost object.");
   const kind = identify(value, path);
   if (!kind) fail(path, "Unrecognized Cohost object; expected an event, ticket, or order.");
@@ -82,6 +90,7 @@ function resolveObject(value: unknown, currency: string, path: string, expected:
 
 function resolve(value: unknown, currency: string, path: string): CohostToEventbriteResult {
   if (Array.isArray(value)) return value.map((item, index) => resolve(item, currency, `${path}[${index}]`));
+  value = unwrap(value);
   if (!isObject(value)) fail(path, "Expected a Cohost object, array, or listing response.");
   const kind = identify(value, path);
   if (kind) return mapObject(value, kind, currency, path);
@@ -99,9 +108,9 @@ function resolve(value: unknown, currency: string, path: string): CohostToEventb
   }
   switch (key) {
     case "events":
-      return { events: items.map((item, index) => resolveObject(item, currency, `${path}.events[${index}]`, "event") as EbEvent), ...metadata };
+      return { events: items.map((item, index) => resolveObject(item, currency, `${path}.events[${index}]`, "event") as EbEventInput), ...metadata };
     case "tickets":
-      return { ticket_classes: items.map((item, index) => resolveObject(item, currency, `${path}.tickets[${index}]`, "ticket") as EbTicketClass), ...metadata };
+      return { ticketClasses: items.map((item, index) => resolveObject(item, currency, `${path}.tickets[${index}]`, "ticket") as EbTicketClassInput), ...metadata };
     case "orders":
       return { orders: items.map((item, index) => resolveObject(item, currency, `${path}.orders[${index}]`, "order") as EbOrder), ...metadata };
     case "results":

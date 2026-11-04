@@ -7,23 +7,14 @@
  * triple per endpoint (`start.utc` + `start.timezone`); Cohost stores a single
  * ISO instant plus a separate `tz`.
  */
-import type { CohostEvent, CohostEventStatus, EbEvent } from "./types.ts";
+import { ebDateTime, idFromUrn, importedId } from "./outbound.ts";
+import type { CohostEvent, CohostEventStatus, EbEvent, EbEventInput } from "./types.ts";
 
 const SOURCE = "eventbrite";
+/** Eventbrite's limit on an event summary. */
+const SUMMARY_MAX = 140;
 
 const EB_TO_COHOST_STATUS: Record<string, CohostEventStatus> = {
-  draft: "draft",
-  live: "live",
-  started: "started",
-  ended: "ended",
-  completed: "completed",
-  canceled: "canceled",
-};
-
-// Cohost statuses without an Eventbrite equivalent collapse to the nearest one.
-const COHOST_TO_EB_STATUS: Record<CohostEventStatus, string> = {
-  archived: "ended",
-  queued: "draft",
   draft: "draft",
   live: "live",
   started: "started",
@@ -62,22 +53,38 @@ export function eventbriteEventToCohost(eb: EbEvent): CohostEvent {
   };
 }
 
-export function cohostEventToEventbrite(ev: CohostEvent): EbEvent {
+/**
+ * Cohost event → the Eventbrite app's Create/Update Event inputs. `eventId` is set
+ * only for an event imported from Eventbrite, so its presence picks update over create.
+ * Eventbrite treats `summary` and the deprecated `description` as mutually exclusive,
+ * so only the summary is sent (falling back to the description's text).
+ */
+export function cohostEventToEventbrite(ev: CohostEvent): EbEventInput {
+  const summary = (ev.summary?.trim() || descriptionText(ev.description)).slice(0, SUMMARY_MAX).trim();
+  const eventId = idFromUrn(ev.urn, "events") ?? importedId(ev);
   return {
-    id: ev.sourceId,
-    name: { text: ev.name, html: ev.name },
-    summary: ev.summary,
-    description: { html: ev.description ?? "", text: stripHtml(ev.description ?? "") },
-    start: { timezone: ev.tz, utc: ev.start },
-    end: { timezone: ev.tz, utc: ev.end },
+    ...(eventId ? { eventId } : {}),
+    name: ev.name,
+    ...(summary ? { summary } : {}),
+    ...(ev.start ? { startUtc: ebDateTime(ev.start) } : {}),
+    ...(ev.end ? { endUtc: ebDateTime(ev.end) } : {}),
+    ...(ev.tz ? { timezone: ev.tz } : {}),
     currency: ev.currency.toUpperCase(),
-    status: COHOST_TO_EB_STATUS[ev.status] ?? "draft",
-    capacity: ev.capacity ?? null,
-    logo: ev.flyer?.url ? { url: ev.flyer.url, original: { url: ev.flyer.url } } : null,
+    ...(typeof ev.capacity === "number" ? { capacity: ev.capacity } : {}),
+    ...(typeof ev.public === "boolean" ? { listed: ev.public } : {}),
   };
 }
 
-/** Very small HTML→text fallback for the `description.text` field. */
+/** Plain text of a description given as an HTML string or Cohost multipart text. */
+function descriptionText(description: CohostEvent["description"]): string {
+  if (!description) return "";
+  if (typeof description === "string") return stripHtml(description);
+  if (typeof description.text === "string") return description.text.trim();
+  if (typeof description.html === "string") return stripHtml(description.html);
+  return typeof description.md === "string" ? description.md.trim() : "";
+}
+
+/** Very small HTML→text fallback. */
 function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim();
 }

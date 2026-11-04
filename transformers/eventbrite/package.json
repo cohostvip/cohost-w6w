@@ -9,7 +9,9 @@
   "keywords": ["cohost", "w6w", "eventbrite", "transformer", "events", "ticketing", "orders", "migration"],
   "private": false,
   "type": "module",
+  "main": "./dist/app.js",
   "scripts": {
+    "build": "esbuild index.ts --bundle --format=esm --platform=neutral --outfile=dist/app.js",
     "check": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -20,6 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.0"

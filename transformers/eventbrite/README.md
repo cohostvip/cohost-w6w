@@ -38,6 +38,7 @@ One resolver per direction — both `type: "perform"`, `idempotent`,
 | --- | --- | --- |
 | **Eventbrite → Cohost** | Eventbrite event, ticket class, order, array, or API listing | Corresponding Cohost object or collection |
 | **Cohost → Eventbrite** | Cohost event, ticket, order, array, or listing | Corresponding Eventbrite object or collection |
+| **Eventbrite Resource URI → URN** | An Eventbrite `resource_uri`, a Company ID and a Connection ID | `{ urn, resourcePath }` — e.g. `…/v3/events/1/ticket_classes/2/` → `urn:1:<company>:<connection>:/events/1/ticket_classes/2`, the same URN Eventbrite → Cohost stamps |
 
 Each action takes `data` as a JSON parameter and returns the mapped object or
 collection. Imported objects are stamped with `source: "eventbrite"` and `sourceId`
@@ -45,36 +46,42 @@ collection. Imported objects are stamped with `source: "eventbrite"` and `source
 
 ### Eventbrite resolver
 
-Call `eventbrite-to-cohost` with `{ data: payload, context, currency?: "USD" }`. The resolver
+Call `eventbrite-to-cohost` with `{ data: payload, companyId, connectionId, currency?: "USD" }`. The resolver
 identifies object families by their fields, without requiring an object-type
 parameter or relying on IDs or URLs:
 
 | Input shape | Result |
 | --- | --- |
-| Event (`name.text`, `start`, or `end`) | Cohost event |
-| Event expanded with `ticket_classes` | Cohost event with mapped `tickets` |
-| Ticket class (`cost`, `free`, `donation`, `quantity_total`, or `on_sale_status`) | Cohost ticket |
-| Order (`costs`, buyer fields, or `attendees` with `id`/`status`) | Cohost order; attendees aggregate into `items` |
-| Array of supported inputs | Array of mapped results, in the same order |
-| `{ events: [...], pagination }` | `{ events: [...mappedEvents], pagination }` |
-| `{ ticket_classes: [...], pagination }` | `{ tickets: [...mappedTickets], pagination }` |
-| `{ orders: [...], pagination }` | `{ orders: [...mappedOrders], pagination }` |
+| Event (`name.text`, `start`, or `end`) | `{ type: "event", urn, data }` — `data` is the Cohost event |
+| Event expanded with `ticket_classes` | `{ type: "event", urn, data }` — mapped tickets stay inside it as `data.tickets` |
+| Ticket class (`cost`, `free`, `donation`, `quantity_total`, or `on_sale_status`) | `{ type: "ticket", urn, data }` — `data` is the Cohost ticket |
+| Order (`costs`, buyer fields, or `attendees` with `id`/`status`) | `{ type: "order", urn, data }` — `data` is the Cohost order; attendees aggregate into `items` |
+| Array of supported inputs | Array of `{ type, urn, data }` results, in the same order |
+| `{ events: [...], pagination }` | `{ events: [{ type, urn, data }, ...], pagination }` |
+| `{ ticket_classes: [...], pagination }` | `{ tickets: [{ type, urn, data }, ...], pagination }` |
+| `{ orders: [...], pagination }` | `{ orders: [{ type, urn, data }, ...], pagination }` |
+
+Every converted object has the same envelope, so `.type` and `.urn` are always at the top level.
+`urn` is also stamped on `data` (and on each nested ticket in `data.tickets`).
+Tickets and orders also get `event_urn` — Eventbrite's `event_id` (or a nested ticket's
+parent event) as the event's URN — so Cohost's Sync Object can resolve it to the synced
+Cohost event (an order's context is built from it). `event_id` itself is not carried over.
+With `event_id`, an order item's `offeringId` is its ticket class's URN
+(`…/events/<id>/ticket_classes/<id>`), so Cohost matches it to the synced ticket; an
+item that matches no ticket of the event fails the order instead of being dropped.
 
 Pagination is optional and preserved when supplied. Listings also convert expanded
 children. A ticket's own cost currency takes precedence; otherwise nested tickets
 use the event currency, and standalone tickets use the optional `currency`
-parameter (default `USD`). Missing or null event ticket expansions are omitted;
+parameter (default `USD`). Missing or null event ticket expansions omit `tickets`;
 an empty expansion becomes `tickets: []`.
 
 The conversion function accepts `eventbriteToCohost(object, context, fallbackCurrency?)`.
-Context includes the owning company and source invocation, separately from the action runtime:
+Context identifies the owning company and the source connection, separately from the action runtime:
 
 ```json
 {
   "companyId": "company_test_eventbrite",
-  "app": "io.w6w.eventbrite",
-  "version": "0.4.2",
-  "action": "get-event",
   "connectionId": "conn_test_YYvhP6e7Irvfthu6"
 }
 ```
@@ -88,11 +95,10 @@ Source paths are `/events/<id>`, `/events/<event_id>/ticket_classes/<id>`, and
 as individual path segments. Listing envelopes and aggregated order items do not
 receive separate URNs.
 
-The company ID is required; it never falls back to the app identifier. Changing
-the app, invocation action, or app version does not change the URN. The company
-ID above is synthetic; use the owning company's ID for real data.
+Both IDs are required; the company ID never falls back to the app identifier. The
+company ID above is synthetic; use the owning company's ID for real data.
 Tests can use `createEventbriteContextFixture()` from
-`tests/artficats/ebrite_context.ts` for fresh metadata with a synthetic connection.
+`tests/artficats/ebrite_context.ts` for a fresh context with a synthetic connection.
 
 Unrecognized or ambiguous shapes fail with the location of the invalid input.
 Standalone attendees and attendee listings are unsupported: supply their parent
@@ -105,13 +111,13 @@ Call `cohost-to-eventbrite` with `{ data: payload, currency?: "USD" }`.
 
 | Input shape | Result |
 | --- | --- |
-| Event (string `start`, `end`, or `tz`) | Eventbrite event |
-| Event expanded with `tickets` | Eventbrite event with mapped `ticket_classes` |
-| Ticket (`price`, `priceCategory`, or `type: "admission"`) | Eventbrite ticket class |
+| Event (string `start`, `end`, or `tz`) | Eventbrite **Create/Update Event** inputs |
+| Event expanded with `tickets` | Event inputs with `ticketClasses` |
+| Ticket (`price`, `priceCategory`, or `type: "admission"`) | Eventbrite **Create/Update Ticket Class** inputs |
 | Order (`customer`, `items`, `orderNumber`, or string `costs.subtotal`) | Eventbrite order; items become `attendees` |
 | Array of supported inputs | Array of mapped results, in the same order |
 | `{ events: [...], pagination }` | `{ events: [...mappedEvents], pagination }` |
-| `{ tickets: [...], pagination }` | `{ ticket_classes: [...mappedTickets], pagination }` |
+| `{ tickets: [...], pagination }` | `{ ticketClasses: [...mappedTickets], pagination }` |
 | `{ orders: [...], pagination }` | `{ orders: [...mappedOrders], pagination }` |
 | `{ results: [...], pagination }` | `{ results: [...mappedObjects], pagination }` |
 
@@ -120,7 +126,26 @@ empty or mixed collections. Pagination metadata is preserved without translating
 its field names between APIs. Event and order currencies default to the optional
 `currency` parameter (or `USD`); ticket amounts carry their own currency.
 Missing or null ticket expansions are omitted; an empty expansion becomes
-`ticket_classes: []`.
+`ticketClasses: []`.
+
+Events and tickets come out as the inputs of the Eventbrite app's write actions,
+so each field binds straight onto Create Event / Update Event and Create Ticket
+Class / Update Ticket Class:
+
+- Event: `name`, `summary` (max 140 characters; falls back to the description's
+  text, since Eventbrite treats summary and description as mutually exclusive),
+  `startUtc`, `endUtc` (`YYYY-MM-DDThh:mm:ssZ`, no fractional seconds), `timezone`,
+  `currency`, `capacity`, `listed` (from `public`).
+- Ticket: `name`, `description`, exactly one of `free` / `donation` / `cost`
+  (`"USD,4500"`), `capacity` (from `quantity`), `hidden`, `salesStart`,
+  `salesEnd`, `minimumQuantity`, `maximumQuantity`.
+- `eventId` / `ticketClassId` are set only for objects imported from Eventbrite
+  (from the connection URN, or `sourceId` with source `eventbrite`): present →
+  update, absent → create. Imported tickets also carry their `eventId`.
+- Status, logo and other read-only fields are not included: publish with Publish
+  Event, and set a logo through Upload Media + `logoId`.
+
+Orders stay in Eventbrite's order shape: Eventbrite has no API to create orders.
 
 Orders require `customer`, `costs`, and an `items` array. Each item requires its
 costs. Standalone attendees and order items must be supplied inside their parent
@@ -136,14 +161,14 @@ The former `eventbrite-event-to-cohost`, `eventbrite-ticket-to-cohost`, and
 `cohost-ticket-to-eventbrite`, and `cohost-order-to-eventbrite` have been replaced
 by `cohost-to-eventbrite`. Rename the previous `event`, `ticketClass`, `ticket`,
 or `order` input parameter to `data`.
-Eventbrite-to-Cohost calls also require the source `context` parameter.
+Eventbrite-to-Cohost calls also require the source `companyId` and `connectionId` parameters.
 
 ```ts
 import { eventbriteToCohost } from "./lib/resolve.ts";
 import { cohostToEventbrite } from "./lib/resolve-cohost.ts";
 
-const cohostEvent = eventbriteToCohost(eventbriteEvent, context); // ticket_classes → tickets, plus source URNs
-const eventbriteResult = cohostToEventbrite(cohostEvent); // tickets → ticket_classes
+const { type, urn, data } = eventbriteToCohost(eventbriteEvent, context); // ticket_classes → data.tickets, plus source URNs
+const eventbriteResult = cohostToEventbrite(data); // tickets → ticket_classes; the whole envelope is accepted too
 ```
 
 ## Mapping notes
