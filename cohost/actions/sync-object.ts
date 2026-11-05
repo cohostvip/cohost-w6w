@@ -6,9 +6,9 @@ type SyncType = "event" | "ticket" | "order";
 interface Input {
   type: SyncType;
   data: Record<string, unknown>;
+  mappedUrn?: string;
+  mappedUrnLabels?: Record<string, unknown>;
   urn?: string;
-  mappedUrn?: { urn: string; labels?: Record<string, unknown> };
-  eventId?: string;
 }
 
 const TYPES: SyncType[] = ["event", "ticket", "order"];
@@ -17,11 +17,12 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /**
- * One step instead of a router: send any synced object as `data` with its `type`,
- * and Cohost's `POST /v1/rms/sync` dispatches it to the event, ticket or order
- * upsert. `urn` (ours) updates an existing Cohost object; `mappedUrn` (the remote
- * URN + labels) updates whatever it is mapped to, or inserts the object and records
- * the mapping. Either one is required, so a retried step never duplicates.
+ * One step instead of a router: send any synced object as `data` with its `type`
+ * and the remote URN it came from (e.g. a transformer's `urn`) as `mappedUrn`.
+ * Cohost's `POST /v1/rms/sync` looks up the Cohost object that URN is mapped to and
+ * updates it, or inserts the object and records the mapping (with `mappedUrnLabels`).
+ * A ticket's or order's `data.event_urn` names its event. `urn` (ours) only forces a
+ * specific Cohost object. One identity is required, so a retried step never duplicates.
  */
 const syncObject: ActionDefinition<Input> = {
   key: "sync-object",
@@ -29,7 +30,7 @@ const syncObject: ActionDefinition<Input> = {
   resource: "urn",
   title: "Sync Object",
   description:
-    "Insert or update a Cohost event, ticket or order by URN. Pass the converted object as data, its type, and our Cohost URN and/or the remote URN it maps to; returns the saved object.",
+    "Insert or update a Cohost event, ticket or order. Pass the converted object as data, its type, and the remote URN it came from; Cohost updates the object that URN is mapped to, or inserts and maps it. Returns the saved object.",
   idempotent: true,
   params: [
     {
@@ -51,31 +52,32 @@ const syncObject: ActionDefinition<Input> = {
       hint: "The object to save, in Cohost's shape (e.g. a transformer's converted `data`).",
     },
     {
+      key: "mappedUrn",
+      label: "Mapped URN",
+      type: "string",
+      required: false,
+      hint: "The remote resource's URN, e.g. the transformer's urn (urn:1:<company>:conn_…:/events/<id>). Updates the Cohost object it is mapped to, or inserts the object and maps it.",
+    },
+    {
+      key: "mappedUrnLabels",
+      label: "Mapped URN Labels",
+      type: "json",
+      required: false,
+      hint: 'Labels merged onto the mapping, e.g. { "source": "eventbrite" }; searchable with Find Mapped Resources.',
+    },
+    {
       key: "urn",
       label: "Cohost URN",
       type: "string",
       required: false,
-      hint: "Our URN when the object already exists in Cohost, e.g. urn:1:<company>:cohost-falcon:/events/<id>.",
-    },
-    {
-      key: "mappedUrn",
-      label: "Mapped URN",
-      type: "json",
-      required: false,
-      hint: 'The remote resource: { "urn": "urn:1:<company>:conn_…:/events/<id>", "labels": { … } }. Labels are merged onto the mapping and searchable with Find Mapped Resources.',
-    },
-    {
-      key: "eventId",
-      label: "Event ID",
-      type: "string",
-      required: false,
-      hint: "Tickets only: the Cohost event id. Defaults to the event the ticket's (or its parent event's) URN is mapped to.",
+      hint: "Optional: force a specific Cohost object (urn:1:<company>:cohost-falcon:/events/<id>). Usually left empty.",
     },
   ],
   output: [
     { key: "type", type: "string", label: "Type" },
     { key: "urn", type: "string", label: "Cohost URN" },
-    { key: "mappedUrn", type: "object", label: "Mapped URN" },
+    { key: "mappedUrn", type: "string", label: "Mapped URN" },
+    { key: "mappedUrnLabels", type: "object", label: "Mapped URN Labels" },
     { key: "id", type: "string", label: "Cohost ID" },
     { key: "data", type: "object", label: "Saved Object" },
     { key: "meta", type: "object", label: "Write Meta (action, changed)" },
@@ -83,20 +85,23 @@ const syncObject: ActionDefinition<Input> = {
   async execute(input, ctx) {
     if (!TYPES.includes(input.type)) throw new Error(`Type must be one of ${TYPES.join(", ")}.`);
     if (!isObject(input.data)) throw new Error("Data must be a JSON object.");
-    const mapped = input.mappedUrn;
-    if (mapped !== undefined && (!isObject(mapped) || typeof mapped.urn !== "string" || !mapped.urn)) {
-      throw new Error('Mapped URN must be { "urn": "…", "labels"?: { … } }.');
+    const { mappedUrn, mappedUrnLabels, urn } = input;
+    if (mappedUrn !== undefined && (typeof mappedUrn !== "string" || !mappedUrn)) {
+      throw new Error("Mapped URN must be a URN string.");
     }
-    if (!input.urn && !mapped) throw new Error("Pass the Cohost URN, the mapped URN, or both.");
-    ctx.log("info", "syncing object", { type: input.type, urn: input.urn, mappedUrn: mapped?.urn });
+    if (mappedUrnLabels !== undefined && !isObject(mappedUrnLabels)) {
+      throw new Error('Mapped URN Labels must be a JSON object, e.g. { "source": "eventbrite" }.');
+    }
+    if (!urn && !mappedUrn) throw new Error("Pass the Mapped URN (or a Cohost URN).");
+    ctx.log("info", "syncing object", { type: input.type, mappedUrn, urn });
     return new CohostClient(ctx).request("/rms/sync", {
       method: "POST",
       body: {
         type: input.type,
         data: input.data,
-        ...(input.urn ? { urn: input.urn } : {}),
-        ...(mapped ? { mappedUrn: mapped } : {}),
-        ...(input.eventId ? { eventId: input.eventId } : {}),
+        ...(mappedUrn ? { mappedUrn } : {}),
+        ...(mappedUrnLabels ? { mappedUrnLabels } : {}),
+        ...(urn ? { urn } : {}),
       },
     });
   },

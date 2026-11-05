@@ -167,27 +167,32 @@ source itself (including its Falcon/Puma alias) is excluded and results are
 deduplicated. Lookups work from either endpoint.
 
 **Sync Object** (`sync-object`) upserts an event, ticket or order in one step —
-no router needed. It calls `POST /rms/sync` with the object as **Data**, its
-**Type** (`event`/`ticket`/`order`), and at least one identity:
+no router, no separate lookup. It calls `POST /rms/sync` with:
+
+- **Type** — `event`/`ticket`/`order` (a transformer's `type`).
+- **Data** — the object (a transformer's `data`), optionally with `event_urn`.
+- **Mapped URN** — the remote URN (a transformer's `urn`). Cohost looks up the
+  object it is mapped to and updates it; if it is not mapped yet, the object is
+  inserted and the mapping recorded.
+- **Mapped URN Labels** — merged onto the mapping, the same way Register URN
+  Mapping stores them.
+- **Cohost URN** (optional) — forces a specific Cohost object; usually empty.
 
 ```json
 {
-  "type": "event",
-  "data": { "name": "…" },
-  "urn": "urn:1:<company>:cohost-falcon:/events/<id>",
-  "mappedUrn": { "urn": "urn:1:<company>:conn_…:/events/<remote-id>", "labels": { "source": "eventbrite" } }
+  "type": "order",
+  "data": { "orderNumber": "…", "event_urn": "urn:1:<company>:conn_…:/events/<remote-id>" },
+  "mappedUrn": "urn:1:<company>:conn_…:/orders/<remote-id>",
+  "mappedUrnLabels": { "source": "eventbrite" }
 }
 ```
 
-`urn` is our Cohost URN and updates that object. `mappedUrn.urn` is the remote
-URN: the object it is mapped to is updated, or the object is inserted and the
-mapping recorded. Its `labels` are merged onto the mapping, the same way Register
-URN Mapping stores them. A ticket's Cohost event comes from **Event ID**, from its
-URN, from `data.event_urn`, or from the mapping of the remote URN's parent event, so
-sync the event first. An order's `data.event_urn` (our event URN, or a remote one the
-event was synced from) names its event; the order's context (`evt_<id>`, organizer)
-is built from it. An event's `data.tickets` are saved with the event.
-It returns `{ type, urn, mappedUrn, id, data, meta }`: our URN, the saved object,
+A ticket's or order's `data.event_urn` (our event URN, or a remote one the event was
+synced from) names its event: a ticket is placed under it, and the order's context
+(`evt_<id>`, organizer) is built from it — so sync the event first. A ticket already
+mapped, or one whose remote parent event is mapped, finds its event without it. An
+event's `data.tickets` are saved with the event. It returns
+`{ type, urn, mappedUrn, mappedUrnLabels, id, data, meta }`: our URN, the saved object,
 and `meta.action` (`create`/`update`) with the changed fields.
 
 For example, `{"purpose":"sync"}` matches a mapped resource whose labels include
