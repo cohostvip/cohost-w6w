@@ -4,7 +4,12 @@
  */
 import { expect, test } from "vitest";
 import { mockCtx } from "../_helpers.ts";
-import { CohostClient } from "../../lib/client.ts";
+import { API_URL, CohostClient, PROD_API_URL } from "../../lib/client.ts";
+
+test("defaults to the production API when the bundle sets no COHOST_API_URL", () => {
+  expect(PROD_API_URL).toBe("https://api.cohost.vip/v1");
+  expect(API_URL).toBe(PROD_API_URL);
+});
 
 test("unwraps { status: ok, data } to data", async () => {
   const { ctx } = mockCtx([{ body: { status: "ok", data: { id: "ord_1" } } }]);

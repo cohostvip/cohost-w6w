@@ -1,5 +1,6 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 import {
   paginatedOutput,
   paginationParams,
@@ -38,7 +39,7 @@ const listEventAttendees: ActionDefinition<Input> = {
   async execute(input, ctx) {
     ctx.log("info", "listing event attendees", { event: input.event });
     const client = new CohostClient(ctx);
-    return client.request(`/events/${encodeURIComponent(input.event)}/attendees`, {
+    return client.request(`/events/${encodeURIComponent(resourceId(input.event, "events"))}/attendees`, {
       query: { ...input.filters, ...paginationQuery(input) },
     });
   },

@@ -1,20 +1,11 @@
 import { CohostClient } from "../lib/client.ts";
+import { pingOf } from "../lib/notification.ts";
+import { ORDER_DETAILS_OUTPUT, ORDER_DETAILS_SAMPLE } from "../lib/outputs.ts";
 import type { TriggerDefinition } from "../lib/w6w-triggers.ts";
 
 /** Opaque state returned by `onSubscribe`, handed back verbatim to `onUnsubscribe`. */
 interface SubscriptionState {
   webhookId: string;
-}
-
-/** The shape `deliverWebhooks` (cohost's dispatcher) actually POSTs — a
- * notification, not the entity itself. See `handleIngest` below for why. */
-interface WebhookPing {
-  id: string;
-  action: string;
-  timestamp: string;
-  urn: string;
-  context: { companyId: string; service: string; resourcePath: string };
-  data?: { changedFields?: string[] };
 }
 
 /** `/orders/<id>` → `<id>`. `resourcePath` is the one field guaranteed to name
@@ -49,17 +40,8 @@ const orderConfirmationRequested: TriggerDefinition<Record<string, never>, unkno
   key: "order-confirmation-requested",
   title: "Order Confirmation Requested",
   description: "Fires when Cohost determines an order confirmation email is due.",
-  output: [
-    { key: "id", type: "string", label: "Order ID" },
-    { key: "orderNumber", type: "string", label: "Order Number" },
-    { key: "status", type: "string", label: "Status" },
-    { key: "currency", type: "string", label: "Currency" },
-    { key: "companyId", type: "string", label: "Company ID" },
-    { key: "organizerId", type: "string", label: "Organizer ID" },
-    { key: "customer", type: "object", label: "Customer" },
-    { key: "items", type: "array", label: "Items" },
-    { key: "costs", type: "object", label: "Costs" },
-  ],
+  output: ORDER_DETAILS_OUTPUT,
+  sample: ORDER_DETAILS_SAMPLE,
 
   async onSubscribe({ callbackUrl }, ctx) {
     const client = new CohostClient(ctx);
@@ -80,7 +62,7 @@ const orderConfirmationRequested: TriggerDefinition<Record<string, never>, unkno
   },
 
   async handleIngest({ raw }, ctx) {
-    const ping = raw as WebhookPing;
+    const ping = pingOf(raw);
     const orderId = orderIdFromPath(ping.context.resourcePath);
     const client = new CohostClient(ctx);
     const order = await client.request(`/orders/${encodeURIComponent(orderId)}`);

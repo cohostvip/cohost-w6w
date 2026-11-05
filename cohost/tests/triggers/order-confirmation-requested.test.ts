@@ -41,7 +41,7 @@ test("order-confirmation-requested: handleIngest fetches the full order from the
   const order = { id: "ord_abc", status: "placed", orderNumber: "CH-100245" };
   const { ctx, calls } = mockCtx([{ body: order }]);
   const events = await orderConfirmationRequested.handleIngest(
-    { raw: PING, params: {}, state: { webhookId: "wh_3" }, subscriptionId: "sub_3" },
+    { raw: { body: PING }, params: {}, state: { webhookId: "wh_3" }, subscriptionId: "sub_3" },
     ctx,
   );
   expect(calls[0].method).toBe("GET");

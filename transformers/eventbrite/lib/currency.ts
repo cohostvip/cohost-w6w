@@ -21,7 +21,7 @@ export function ebToCohostAmount(cost: EbCurrency | null | undefined, fallbackCu
 }
 
 /** `"USD,1000"` → `{ currency, value, major_value, display }`. Throws on a malformed string. */
-export function cohostToEbAmount(amount: string): Required<EbCurrency> {
+export function cohostToEbAmount(amount: string | undefined): Required<EbCurrency> {
   const m = COHOST_AMOUNT.exec(amount?.trim() ?? "");
   if (!m) {
     throw new Error(`invalid Cohost currency amount: ${JSON.stringify(amount)} (expected "USD,1000")`);

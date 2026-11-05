@@ -5,8 +5,11 @@ import type { ConversionContext } from "../../../shared/context.ts";
 
 interface Input {
   data: unknown;
-  context: ConversionContext;
+  companyId: string;
+  connectionId: string;
   currency?: string;
+  /** @deprecated Steps saved before companyId / connectionId were separate fields. */
+  context?: ConversionContext;
 }
 
 const eventbriteToCohostAction: ActionDefinition<Input, EventbriteToCohostResult> = {
@@ -19,12 +22,14 @@ const eventbriteToCohostAction: ActionDefinition<Input, EventbriteToCohostResult
   requiresAuth: false,
   params: [
     { key: "data", label: "Eventbrite Data (JSON)", type: "json", required: true },
-    { key: "context", label: "Conversion Context (JSON)", type: "json", required: true, hint: "Company ID plus source app, version, action, and connectionId. URNs use companyId and connectionId." },
+    { key: "companyId", label: "Company ID", type: "string", required: true, default: "{{ const.account_id }}", hint: "The Cohost company the converted objects belong to. Part of each source URN. Defaults to this account." },
+    { key: "connectionId", label: "Connection ID", type: "string", required: true, hint: "The Eventbrite connection, e.g. conn_… Part of each source URN." },
     { key: "currency", label: "Fallback Currency", type: "string", hint: "Used for standalone tickets without a cost currency. Nested tickets use the event currency. Defaults to USD." },
   ],
 
   execute(input) {
-    return eventbriteToCohost(input.data, input.context, input.currency ?? "USD");
+    const context = input.context ?? { companyId: input.companyId, connectionId: input.connectionId };
+    return eventbriteToCohost(input.data, context, input.currency ?? "USD");
   },
 };
 

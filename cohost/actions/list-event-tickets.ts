@@ -1,5 +1,6 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 import type { Ticket } from "../lib/types.ts";
 
 interface Input {
@@ -27,7 +28,7 @@ const listEventTickets: ActionDefinition<Input> = {
     ctx.log("info", "listing event tickets", { event: input.event });
     const client = new CohostClient(ctx);
     const results = await client.request<Ticket[]>(
-      `/events/${encodeURIComponent(input.event)}/tickets`,
+      `/events/${encodeURIComponent(resourceId(input.event, "events"))}/tickets`,
     );
     return { results };
   },

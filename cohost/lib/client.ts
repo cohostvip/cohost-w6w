@@ -1,7 +1,19 @@
 import type { HookContext } from "@w6w/types";
 
-/** Cohost API base (versioned). */
-export const API_URL = "https://api.cohost.vip/v1";
+/** Production Cohost API base (versioned). */
+export const PROD_API_URL = "https://api.cohost.vip/v1";
+
+// Replaced at bundle time with `COHOST_API_URL` when it is set (see scripts/bundle.mjs).
+declare const __COHOST_API_URL__: string | undefined;
+
+/**
+ * Cohost API base (versioned). Production unless the bundle was built with
+ * `COHOST_API_URL` (a local build pointing at a local Cohost stack).
+ */
+export const API_URL: string =
+  typeof __COHOST_API_URL__ === "string" && __COHOST_API_URL__ !== ""
+    ? __COHOST_API_URL__.replace(/\/+$/, "")
+    : PROD_API_URL;
 
 export interface RequestOptions {
   method?: string;

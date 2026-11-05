@@ -1,6 +1,7 @@
 import type { AppDefinition } from "@w6w/types";
 import eventbriteToCohost from "./actions/eventbrite-to-cohost.ts";
 import cohostToEventbrite from "./actions/cohost-to-eventbrite.ts";
+import resourceUriToUrn from "./actions/resource-uri-to-urn.ts";
 
 /**
  * The Eventbrite ⇄ Cohost transformer app.
@@ -17,5 +18,6 @@ export default {
   actions: [
     eventbriteToCohost,
     cohostToEventbrite,
+    resourceUriToUrn,
   ],
 } satisfies AppDefinition;

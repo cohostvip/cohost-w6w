@@ -5,17 +5,22 @@ import { generateUrn, validateConversionContext } from "../../../shared/urn.ts";
 import type { ConversionContext } from "../../../shared/context.ts";
 import type { CohostEvent, CohostOrder, CohostTicket, EbEvent, EbOrder, EbTicketClass } from "./types.ts";
 
-type Kind = "event" | "ticket" | "order";
+export type Kind = "event" | "ticket" | "order";
 type JsonObject = Record<string, unknown>;
 type Pagination = { pagination?: JsonObject };
 
+/** One converted object: its kind, its source URN, and the Cohost object itself. */
+export type Converted<K extends Kind = Kind> = {
+  type: K;
+  urn: string;
+  data: { event: CohostEvent; ticket: CohostTicket; order: CohostOrder }[K];
+};
+
 export type EventbriteToCohostResult =
-  | CohostEvent
-  | CohostTicket
-  | CohostOrder
-  | ({ events: CohostEvent[] } & Pagination)
-  | ({ tickets: CohostTicket[] } & Pagination)
-  | ({ orders: CohostOrder[] } & Pagination)
+  | Converted
+  | ({ events: Converted<"event">[] } & Pagination)
+  | ({ tickets: Converted<"ticket">[] } & Pagination)
+  | ({ orders: Converted<"order">[] } & Pagination)
   | EventbriteToCohostResult[];
 
 function isObject(value: unknown): value is JsonObject {
@@ -78,6 +83,7 @@ function mapObject(value: JsonObject, kind: Kind, context: ConversionContext, cu
       return {
         ...eventbriteTicketToCohost(value as EbTicketClass, currency),
         urn: generateUrn(`/events/${eventId}/ticket_classes/${sourceId(value.id, `${path}.id`)}`, context),
+        event_urn: generateUrn(`/events/${eventId}`, context),
       };
     }
     case "order": {
@@ -87,10 +93,18 @@ function mapObject(value: JsonObject, kind: Kind, context: ConversionContext, cu
           if (!isObject(attendee)) fail(`${path}.attendees[${index}]`, "Expected an attendee object.");
         });
       }
-      return {
-        ...eventbriteOrderToCohost(value as EbOrder),
-        urn: generateUrn(`/orders/${sourceId(value.id, `${path}.id`)}`, context),
-      };
+      const order = eventbriteOrderToCohost(value as EbOrder);
+      if (value.event_id != null) {
+        const eventPath = `/events/${sourceId(value.event_id, `${path}.event_id`)}`;
+        // Eventbrite's `event_id` → the event's URN, and each item's ticket class → that ticket's URN,
+        // so a sync can resolve them to the Cohost event and its tickets.
+        order.event_urn = generateUrn(eventPath, context);
+        order.items = order.items.map((item, index) => item.offeringId === "unknown" ? item : {
+          ...item,
+          offeringId: generateUrn(`${eventPath}/ticket_classes/${sourceId(item.offeringId, `${path}.items[${index}].offeringId`)}`, context),
+        });
+      }
+      return { ...order, urn: generateUrn(`/orders/${sourceId(value.id, `${path}.id`)}`, context) };
     }
   }
 }
@@ -103,13 +117,17 @@ function resolveObject(value: unknown, context: ConversionContext, currency: str
   return mapObject(value, kind, context, currency, path, parentEventId);
 }
 
+function wrap<K extends Kind>(type: K, data: CohostEvent | CohostTicket | CohostOrder): Converted<K> {
+  return { type, urn: data.urn as string, data } as Converted<K>;
+}
+
 function resolve(value: unknown, context: ConversionContext, currency: string, path: string): EventbriteToCohostResult {
   if (Array.isArray(value)) {
     return value.map((item, index) => resolve(item, context, currency, `${path}[${index}]`));
   }
   if (!isObject(value)) fail(path, "Expected an Eventbrite object, array, or listing response.");
   const kind = identify(value, path);
-  if (kind) return mapObject(value, kind, context, currency, path);
+  if (kind) return wrap(kind, mapObject(value, kind, context, currency, path));
 
   const keys = (["events", "ticket_classes", "orders"] as const).filter(key => key in value);
   if (keys.length > 1) fail(path, "Ambiguous listing; expected exactly one of events, ticket_classes, or orders.");
@@ -124,15 +142,20 @@ function resolve(value: unknown, context: ConversionContext, currency: string, p
   }
   switch (key) {
     case "events":
-      return { events: items.map((item, index) => resolveObject(item, context, currency, `${path}.events[${index}]`, "event") as CohostEvent), ...metadata };
+      return { events: items.map((item, index) => wrap("event", resolveObject(item, context, currency, `${path}.events[${index}]`, "event"))), ...metadata };
     case "ticket_classes":
-      return { tickets: items.map((item, index) => resolveObject(item, context, currency, `${path}.ticket_classes[${index}]`, "ticket") as CohostTicket), ...metadata };
+      return { tickets: items.map((item, index) => wrap("ticket", resolveObject(item, context, currency, `${path}.ticket_classes[${index}]`, "ticket"))), ...metadata };
     case "orders":
-      return { orders: items.map((item, index) => resolveObject(item, context, currency, `${path}.orders[${index}]`, "order") as CohostOrder), ...metadata };
+      return { orders: items.map((item, index) => wrap("order", resolveObject(item, context, currency, `${path}.orders[${index}]`, "order"))), ...metadata };
   }
 }
 
-/** Resolve singular objects, arrays, and API listings, including expanded event tickets and order attendees. */
+/**
+ * Resolve singular objects, arrays, and API listings, including expanded event tickets and order attendees.
+ * Every converted object comes back as `{ type, urn, data }` — singular inputs, array items, and listing
+ * items alike — so `.urn` and `.type` are always at the same place. An event's expanded ticket classes
+ * stay inside it as `data.tickets`.
+ */
 export function eventbriteToCohost(object: unknown, context: ConversionContext, fallbackCurrency = "USD"): EventbriteToCohostResult {
   validateConversionContext(context);
   return resolve(object, context, fallbackCurrency, "data");

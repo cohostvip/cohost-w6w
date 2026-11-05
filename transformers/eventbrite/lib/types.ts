@@ -62,7 +62,10 @@ export interface EbTicketClass {
   description?: string | null;
   cost?: EbCurrency | null;
   fee?: EbCurrency | null;
+  tax?: EbCurrency | null;
   free?: boolean;
+  donation?: boolean;
+  capacity?: number | null;
   quantity_total?: number | null;
   quantity_sold?: number;
   minimum_quantity?: number | null;
@@ -70,6 +73,7 @@ export interface EbTicketClass {
   hidden?: boolean;
   sales_start?: string | null;
   sales_end?: string | null;
+  sorting?: number;
   event_id?: string;
   [k: string]: unknown;
 }
@@ -77,6 +81,7 @@ export interface EbTicketClass {
 export interface EbAttendee {
   id?: string;
   ticket_class_id?: string;
+  ticket_class_name?: string;
   quantity?: number;
   profile?: { name?: string; first_name?: string; last_name?: string; email?: string; cell_phone?: string };
   costs?: {
@@ -111,6 +116,49 @@ export interface EbOrder {
   [k: string]: unknown;
 }
 
+/**
+ * Inputs for the Eventbrite app's Create Event / Update Event actions — what
+ * `cohost-to-eventbrite` produces, so each field binds straight onto them.
+ * Read-only Eventbrite fields (status, url, logo URL, ids of other objects) are
+ * not part of it: status changes go through Publish Event, a logo through Upload Media.
+ */
+export interface EbEventInput {
+  /** The Eventbrite event this Cohost event was imported from; set only then (→ Update Event). */
+  eventId?: string;
+  name: string;
+  /** Plain text, max 140 characters (Eventbrite's limit). */
+  summary?: string;
+  /** `YYYY-MM-DDThh:mm:ssZ` — Eventbrite rejects fractional seconds. */
+  startUtc?: string;
+  endUtc?: string;
+  timezone?: string;
+  currency: string;
+  capacity?: number;
+  listed?: boolean;
+  /** Expanded Cohost tickets, as Create/Update Ticket Class inputs. */
+  ticketClasses?: EbTicketClassInput[];
+}
+
+/** Inputs for the Eventbrite app's Create / Update Ticket Class actions. */
+export interface EbTicketClassInput {
+  /** The Eventbrite event of an imported ticket, when known. */
+  eventId?: string;
+  /** The Eventbrite ticket class this Cohost ticket was imported from; set only then (→ Update Ticket Class). */
+  ticketClassId?: string;
+  name: string;
+  description?: string;
+  /** `"USD,4500"` — currency, comma, minor units. Only on paid tickets. */
+  cost?: string;
+  free?: boolean;
+  donation?: boolean;
+  capacity?: number;
+  hidden: boolean;
+  salesStart?: string;
+  salesEnd?: string;
+  minimumQuantity?: number;
+  maximumQuantity?: number;
+}
+
 // ─────────────────────────────── Cohost ───────────────────────────────
 // Projections of `@cohostvip/types` — the fields this transformer reads/writes.
 
@@ -133,6 +181,14 @@ export type CohostEventStatus =
   | "completed"
   | "canceled";
 
+/** Cohost's multi-format text (the API returns event descriptions in this shape). */
+export interface CohostMultipartText {
+  html?: string;
+  text?: string;
+  md?: string;
+  [k: string]: unknown;
+}
+
 export interface CohostEvent {
   urn?: string;
   /** Expanded Eventbrite ticket classes, mapped to Cohost tickets when present. */
@@ -140,7 +196,8 @@ export interface CohostEvent {
   id?: string;
   name: string;
   summary: string;
-  description?: string | null;
+  /** A plain HTML string, or the multipart text the Cohost API returns. */
+  description?: string | CohostMultipartText | null;
   companyId?: string;
   tz: string;
   /** ISO-8601. */
@@ -162,21 +219,34 @@ export type CohostTicketStatus = "live" | "hidden" | "sold-out" | "draft" | "arc
 
 export interface CohostTicket {
   urn?: string;
+  /** The URN of the event it belongs to (from Eventbrite's `event_id`). */
+  event_urn?: string;
   id?: string;
   name: string;
   display_name?: string;
   description?: string;
   category: string;
   type: "admission" | "package" | "admission.tableCommitment";
-  currency: string;
-  /** Cohost currency-amount string, e.g. `"USD,1000"`. */
-  price: string;
+  /** Legacy input aliases still accepted on the way out (Cohost writes take `costs.cost` / `capacity`). */
+  currency?: string;
+  price?: string;
   quantity?: number;
+  /** Cohost currency-amount strings (`"USD,1000"`); `cost` is the ticket price before fees. */
+  costs?: { cost?: string; fee?: string; tax?: string; delivery?: string; gross?: string; total?: string; [k: string]: unknown };
+  capacity?: number;
   quantitySold?: number;
+  minimumQuantity?: number;
+  maximumQuantity?: number;
+  /** ISO-8601. */
+  salesStart?: string;
+  salesEnd?: string;
   status: CohostTicketStatus;
   priceCategory: "donation" | "free" | "paid" | "other";
   transferable: boolean;
+  sorting?: number;
   source?: string;
+  /** The Eventbrite ticket class id (Cohost's `refId`). */
+  refId?: string;
   sourceId?: string;
   [k: string]: unknown;
 }
@@ -191,14 +261,24 @@ export interface CohostCustomer {
 }
 
 export interface CohostOrderItem {
+  /** The Eventbrite attendee id — stable, so a re-sync updates the same item. */
+  id?: string;
   offeringId: string;
+  offeringType?: "admission";
+  /** The ticket class name. */
   name?: string;
   quantity: number;
+  /** Per-unit `cost`/`fee`/`tax`/`delivery`; line totals `subtotal`/`gross`/`preDiscount`/`total`. */
   costs: {
     cost: string;
     fee: string;
     tax: string;
     gross: string;
+    delivery?: string;
+    discount?: string;
+    subtotal?: string;
+    preDiscount?: string;
+    total?: string;
   };
 }
 
@@ -217,6 +297,8 @@ export type CohostOrderStatus = "placed" | "voided" | "refunded";
 
 export interface CohostOrder {
   urn?: string;
+  /** The URN of the event it belongs to (from Eventbrite's `event_id`). */
+  event_urn?: string;
   id?: string;
   orderNumber?: string;
   status: CohostOrderStatus;

@@ -1,5 +1,6 @@
 import type { ActionDefinition } from "@w6w/types";
 import { CohostClient } from "../lib/client.ts";
+import { resourceId } from "../lib/resource-id.ts";
 import type { Attendee } from "../lib/types.ts";
 
 interface Input {
@@ -35,7 +36,7 @@ const listOrderAttendees: ActionDefinition<Input> = {
     ctx.log("info", "listing order attendees", { order: input.order });
     const client = new CohostClient(ctx);
     const results = await client.request<Attendee[]>(
-      `/orders/${encodeURIComponent(input.order)}/attendees`,
+      `/orders/${encodeURIComponent(resourceId(input.order, "orders"))}/attendees`,
       { query: { uid: input.uid } },
     );
     return { results };

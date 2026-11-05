@@ -12,7 +12,7 @@ const cohostToEventbriteAction: ActionDefinition<Input, CohostToEventbriteResult
   type: "perform",
   resource: "transform",
   title: "Cohost → Eventbrite",
-  description: "Detect and convert Cohost events, tickets, orders, arrays, and listings, including expanded tickets and order items.",
+  description: "Detect and convert Cohost events, tickets, orders, arrays, and listings. Events and tickets become the inputs of Eventbrite's Create/Update Event and Ticket Class actions (an `eventId` / `ticketClassId` means update); orders keep Eventbrite's order shape.",
   idempotent: true,
   requiresAuth: false,
   params: [
