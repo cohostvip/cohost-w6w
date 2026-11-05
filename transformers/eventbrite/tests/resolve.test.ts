@@ -10,7 +10,7 @@ const context = createEventbriteContextFixture();
 
 test("detects shapes independently of resource URLs and ID naming conventions", () => {
   expect(eventbriteToCohost({ id: "123", name: { text: "Festival" } }, context)).toMatchObject({ type: "event", data: { name: "Festival", tz: "UTC" } });
-  expect(eventbriteToCohost({ id: "123", event_id: "event-1", name: "Free entry", free: true }, context, "EUR")).toMatchObject({ type: "ticket", data: { price: "EUR,0" } });
+  expect(eventbriteToCohost({ id: "123", event_id: "event-1", name: "Free entry", free: true }, context, "EUR")).toMatchObject({ type: "ticket", data: { costs: { cost: "EUR,0" } } });
   expect(eventbriteToCohost({ id: "123", email: "buyer@example.com", status: "placed" }, context)).toMatchObject({
     type: "order", data: { customer: { email: "buyer@example.com" }, items: [] },
   });
@@ -25,8 +25,8 @@ test("expanded event maps all ticket classes without mutating the input", () => 
   expect(result.sourceId).toBe(input.id);
   expect(result).not.toHaveProperty("ticket_classes");
   expect(tickets).toHaveLength(9);
-  expect(tickets?.map(ticket => ticket.sourceId)).toEqual(input.ticket_classes.map(ticket => ticket.id));
-  expect(tickets?.[0]).toMatchObject({ type: "admission", price: "USD,2500", quantity: 50 });
+  expect(tickets?.map(ticket => ticket.refId)).toEqual(input.ticket_classes.map(ticket => ticket.id));
+  expect(tickets?.[0]).toMatchObject({ type: "admission", costs: { cost: "USD,2500" }, capacity: 50 });
   expect(input).toEqual(original);
 });
 
@@ -38,7 +38,7 @@ test("nested free tickets use event currency; explicit ticket currency wins", ()
       { id: "ticket-2", name: "Paid", cost: { currency: "GBP", value: 1500 } },
     ],
   }, context, "CAD") as Converted<"event">;
-  expect(tickets?.map(ticket => ticket.price)).toEqual(["EUR,0", "GBP,1500"]);
+  expect(tickets?.map(ticket => ticket.costs?.cost)).toEqual(["EUR,0", "GBP,1500"]);
 });
 
 test("absent and null expansions stay absent, while empty expansions stay empty", () => {
@@ -48,16 +48,16 @@ test("absent and null expansions stay absent, while empty expansions stay empty"
   expect(eventbriteToCohost({ ...event, ticket_classes: [] }, context)).toHaveProperty("data.tickets", []);
 });
 
-test("expanded order aggregates multiple attendees into Cohost line items", () => {
+test("expanded order maps each attendee to its own Cohost line item", () => {
   const input = createEventbriteOrdersFixture({ type: "expanded_order", orderIndex: 4 });
   const original = structuredClone(input);
   const result = (eventbriteToCohost(input, context) as Converted<"order">).data;
   expect(result.orderNumber).toBe(input.id);
   expect(result.customer.email).toBe(input.email);
-  expect(result.items).toHaveLength(1);
-  expect(result.items[0].quantity).toBe(4);
+  expect(result.items.map(item => item.id)).toEqual(input.attendees.map(attendee => attendee.id));
+  expect(result.items.reduce((sum, item) => sum + item.quantity, 0)).toBe(4);
   expect(result.items[0].offeringId).toBe(generateUrn(`/events/${input.event_id}/ticket_classes/${input.attendees[0].ticket_class_id}`, context));
-  expect(result.items[0].costs.cost).toBe(`USD,${input.costs.base_price.value}`);
+  expect(result.items[0].costs.cost).toBe(`USD,${input.attendees[0].costs.base_price.value}`);
   expect(result).not.toHaveProperty("attendees");
   expect(input).toEqual(original);
   expect(eventbriteToCohost(createEventbriteOrdersFixture({ type: "order" }), context)).toHaveProperty("data.items", []);
@@ -76,14 +76,14 @@ test("event listings map expanded children and preserve pagination independently
 test("ticket and order listings map every object", () => {
   const tickets = createEventbriteFixture({ type: "ticket_class_listing" });
   const ticketResult = eventbriteToCohost(tickets, context) as { tickets: Converted<"ticket">[]; pagination: unknown };
-  expect(ticketResult.tickets.map(ticket => ticket.data.sourceId)).toEqual(tickets.ticket_classes.map(ticket => ticket.id));
+  expect(ticketResult.tickets.map(ticket => ticket.data.refId)).toEqual(tickets.ticket_classes.map(ticket => ticket.id));
   expect(ticketResult.pagination).toEqual(tickets.pagination);
   expect(ticketResult).not.toHaveProperty("ticket_classes");
 
   const orders = createEventbriteOrdersFixture();
   const orderResult = eventbriteToCohost(orders, context) as { orders: Converted<"order">[]; pagination: unknown };
   expect(orderResult.orders.map(order => order.data.sourceId)).toEqual(orders.orders.map(order => order.id));
-  expect(orderResult.orders[4].data.items[0].quantity).toBe(4);
+  expect(orderResult.orders[4].data.items).toHaveLength(4);
   expect(orderResult.pagination).toEqual(orders.pagination);
 });
 
@@ -95,7 +95,7 @@ test("arrays can mix recognized object families and can be empty", () => {
   ], context);
   expect(result).toEqual([
     { type: "event", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ name: "Example Community Festival", tz: "America/New_York" }) },
-    { type: "ticket", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ price: "USD,2500" }) },
+    { type: "ticket", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ costs: expect.objectContaining({ cost: "USD,2500" }) }) },
     { type: "order", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ orderNumber: "6000000000001" }) },
   ]);
   expect(eventbriteToCohost([], context)).toEqual([]);

@@ -62,7 +62,10 @@ export interface EbTicketClass {
   description?: string | null;
   cost?: EbCurrency | null;
   fee?: EbCurrency | null;
+  tax?: EbCurrency | null;
   free?: boolean;
+  donation?: boolean;
+  capacity?: number | null;
   quantity_total?: number | null;
   quantity_sold?: number;
   minimum_quantity?: number | null;
@@ -70,6 +73,7 @@ export interface EbTicketClass {
   hidden?: boolean;
   sales_start?: string | null;
   sales_end?: string | null;
+  sorting?: number;
   event_id?: string;
   [k: string]: unknown;
 }
@@ -77,6 +81,7 @@ export interface EbTicketClass {
 export interface EbAttendee {
   id?: string;
   ticket_class_id?: string;
+  ticket_class_name?: string;
   quantity?: number;
   profile?: { name?: string; first_name?: string; last_name?: string; email?: string; cell_phone?: string };
   costs?: {
@@ -222,13 +227,12 @@ export interface CohostTicket {
   description?: string;
   category: string;
   type: "admission" | "package" | "admission.tableCommitment";
-  currency: string;
-  /** Cohost currency-amount string, e.g. `"USD,1000"`. Writes take it; API reads return `costs.cost` instead. */
+  /** Legacy input aliases still accepted on the way out (Cohost writes take `costs.cost` / `capacity`). */
+  currency?: string;
   price?: string;
-  /** Computed costs on tickets the Cohost API returns; `cost` is the ticket price before fees. */
-  costs?: { cost?: string; [k: string]: unknown };
   quantity?: number;
-  /** What API reads return in place of `quantity`. */
+  /** Cohost currency-amount strings (`"USD,1000"`); `cost` is the ticket price before fees. */
+  costs?: { cost?: string; fee?: string; tax?: string; delivery?: string; gross?: string; total?: string; [k: string]: unknown };
   capacity?: number;
   quantitySold?: number;
   minimumQuantity?: number;
@@ -239,7 +243,10 @@ export interface CohostTicket {
   status: CohostTicketStatus;
   priceCategory: "donation" | "free" | "paid" | "other";
   transferable: boolean;
+  sorting?: number;
   source?: string;
+  /** The Eventbrite ticket class id (Cohost's `refId`). */
+  refId?: string;
   sourceId?: string;
   [k: string]: unknown;
 }
@@ -254,14 +261,24 @@ export interface CohostCustomer {
 }
 
 export interface CohostOrderItem {
+  /** The Eventbrite attendee id — stable, so a re-sync updates the same item. */
+  id?: string;
   offeringId: string;
+  offeringType?: "admission";
+  /** The ticket class name. */
   name?: string;
   quantity: number;
+  /** Per-unit `cost`/`fee`/`tax`/`delivery`; line totals `subtotal`/`gross`/`preDiscount`/`total`. */
   costs: {
     cost: string;
     fee: string;
     tax: string;
     gross: string;
+    delivery?: string;
+    discount?: string;
+    subtotal?: string;
+    preDiscount?: string;
+    total?: string;
   };
 }
 

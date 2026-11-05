@@ -16,18 +16,34 @@ test("eventbriteTicketToCohost: paid ticket", () => {
   const t = eventbriteTicketToCohost(paid);
   expect(t.name).toBe("General Admission");
   expect(t.type).toBe("admission");
-  expect(t.currency).toBe("USD");
-  expect(t.price).toBe("USD,2500");
-  expect(t.quantity).toBe(100);
+  expect(t.category).toBe("General Admission");
+  expect(t.costs).toEqual({ cost: "USD,2500", fee: "USD,0", tax: "USD,0", delivery: "USD,0", gross: "USD,2500", total: "USD,2500" });
+  expect(t.capacity).toBe(100);
   expect(t.status).toBe("live");
   expect(t.priceCategory).toBe("paid");
-  expect(t.sourceId).toBe("tc_1");
+  expect(t.refId).toBe("tc_1");
+  // Cohost tickets take costs/capacity/refId; the write-only aliases are not emitted.
+  for (const key of ["price", "quantity", "currency", "sourceId"]) expect(t).not.toHaveProperty(key);
+});
+
+test("eventbriteTicketToCohost: Eventbrite's own fee and tax do not become Cohost costs", () => {
+  const t = eventbriteTicketToCohost({ ...paid, fee: { currency: "USD", value: 300 }, tax: { currency: "USD", value: 100 } });
+  expect(t.costs).toMatchObject({ cost: "USD,2500", fee: "USD,0", tax: "USD,0", total: "USD,2500" });
+});
+
+test("eventbriteTicketToCohost: capacity, sales window, sorting and donation", () => {
+  const t = eventbriteTicketToCohost({
+    ...paid, capacity: 80, donation: true, sorting: 3, sales_start: "2026-10-01T10:00:00Z", sales_end: "2026-10-31T00:00:00Z",
+  });
+  expect(t).toMatchObject({ capacity: 80, priceCategory: "donation", sorting: 3, salesStart: "2026-10-01T10:00:00Z", salesEnd: "2026-10-31T00:00:00Z" });
+  expect(eventbriteTicketToCohost({ id: "tc_3", name: "Open" })).not.toHaveProperty("capacity");
 });
 
 test("eventbriteTicketToCohost: free ticket", () => {
   const t = eventbriteTicketToCohost({ id: "tc_2", name: "RSVP", free: true, quantity_total: 50 });
   expect(t.priceCategory).toBe("free");
-  expect(t.price).toBe("USD,0");
+  expect(t.costs?.cost).toBe("USD,0");
+  expect(t.capacity).toBe(50);
 });
 
 test("eventbriteTicketToCohost: per-order limits, defaulting to 1 and 10 when Eventbrite leaves them unset", () => {

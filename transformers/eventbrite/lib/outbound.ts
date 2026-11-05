@@ -21,7 +21,8 @@ export function idFromUrn(urn: unknown, segment: "events" | "ticket_classes"): s
 }
 
 /** The upstream id of an object imported from Eventbrite; Cohost-native objects have none. */
-export function importedId(value: { source?: unknown; sourceId?: unknown }): string | undefined {
+export function importedId(value: { source?: unknown; sourceId?: unknown; refId?: unknown }): string | undefined {
   const fromEventbrite = value.source === undefined || value.source === "eventbrite";
-  return fromEventbrite && typeof value.sourceId === "string" && value.sourceId ? value.sourceId : undefined;
+  const id = value.refId ?? value.sourceId;
+  return fromEventbrite && typeof id === "string" && id ? id : undefined;
 }

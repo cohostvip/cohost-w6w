@@ -69,8 +69,8 @@ test("orders convert items to attendees while preserving quantities and mapped t
   const result = cohostToEventbrite(order) as EbOrder;
   expect(result.id).toBe(order.sourceId);
   expect(result.email).toBe(order.customer.email);
-  expect(result.attendees).toHaveLength(1);
-  expect(result.attendees?.[0]).toMatchObject({ ticket_class_id: order.items[0].offeringId, quantity: 4 });
+  expect(result.attendees).toHaveLength(4);
+  expect(result.attendees?.[0]).toMatchObject({ id: order.items[0].id, ticket_class_id: order.items[0].offeringId, quantity: 1 });
   expect(result.costs?.gross?.value).toBe(Number(order.costs.total.split(",")[1]));
   expect(result.costs?.payment_fee?.value).toBe(0);
   expect(order).toEqual(original);

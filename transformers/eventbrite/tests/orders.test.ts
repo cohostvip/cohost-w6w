@@ -19,7 +19,9 @@ const ebOrder: EbOrder = {
   },
   attendees: [
     {
+      id: "att_1",
       ticket_class_id: "tc_1",
+      ticket_class_name: "General Admission",
       quantity: 1,
       profile: { name: "Jane Doe", email: "jane@example.com" },
       costs: {
@@ -30,7 +32,9 @@ const ebOrder: EbOrder = {
       },
     },
     {
+      id: "att_2",
       ticket_class_id: "tc_1",
+      ticket_class_name: "General Admission",
       quantity: 1,
       profile: { name: "Guest", email: "guest@example.com" },
       costs: {
@@ -62,13 +66,32 @@ test("eventbriteOrderToCohost: costs sum fees and compute gross/total", () => {
   expect(costs.discount).toBe("USD,0");
 });
 
-test("eventbriteOrderToCohost: attendees aggregate by ticket class", () => {
+test("eventbriteOrderToCohost: one item per attendee, keyed by the attendee id, with full item costs", () => {
   const { items } = eventbriteOrderToCohost(ebOrder);
-  expect(items).toHaveLength(1);
-  expect(items[0].offeringId).toBe("tc_1");
-  expect(items[0].quantity).toBe(2);
-  expect(items[0].costs.cost).toBe("USD,5000");
-  expect(items[0].costs.fee).toBe("USD,450");
+  expect(items.map((item) => item.id)).toEqual(["att_1", "att_2"]);
+  expect(items[0]).toEqual({
+    id: "att_1",
+    offeringId: "tc_1",
+    offeringType: "admission",
+    name: "General Admission",
+    quantity: 1,
+    costs: {
+      cost: "USD,2500",
+      fee: "USD,225", // eventbrite_fee + payment_fee
+      tax: "USD,200",
+      delivery: "USD,0",
+      discount: "USD,0",
+      subtotal: "USD,2500",
+      gross: "USD,2725", // cost + fee
+      preDiscount: "USD,2725",
+      total: "USD,2925", // gross + tax
+    },
+  });
+});
+
+test("eventbriteOrderToCohost: item line totals scale with quantity; per-unit costs do not", () => {
+  const [item] = eventbriteOrderToCohost({ ...ebOrder, attendees: [{ ...ebOrder.attendees![0], quantity: 2 }] }).items;
+  expect(item.costs).toMatchObject({ cost: "USD,2500", fee: "USD,225", subtotal: "USD,5000", gross: "USD,5450", total: "USD,5850" });
 });
 
 test("eventbriteOrderToCohost: refunded / cancelled statuses", () => {
@@ -84,7 +107,7 @@ test("cohostOrderToEventbrite: round-trips totals and attendees", () => {
   expect(back.costs?.eventbrite_fee?.value).toBe(450);
   expect(back.costs?.payment_fee?.value).toBe(0);
   expect(back.costs?.gross?.value).toBe(5850);
-  expect(back.attendees).toHaveLength(1);
-  expect(back.attendees?.[0].ticket_class_id).toBe("tc_1");
-  expect(back.attendees?.[0].quantity).toBe(2);
+  expect(back.attendees).toHaveLength(2);
+  expect(back.attendees?.[0]).toMatchObject({ id: "att_1", ticket_class_id: "tc_1", ticket_class_name: "General Admission", quantity: 1 });
+  expect(back.attendees?.[0].costs?.gross?.value).toBe(2925);
 });

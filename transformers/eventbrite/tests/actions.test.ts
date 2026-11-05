@@ -33,7 +33,7 @@ test("eventbrite-to-cohost: detects an event", async () => {
 
 test("eventbrite-to-cohost: detects a ticket and honors fallback currency", async () => {
   const out = await ebToCohost.execute({ ...context, data: { id: "ticket-1", event_id: "event-1", name: "Free", free: true }, currency: "EUR" }, ctx);
-  expect(out).toMatchObject({ type: "ticket", data: { price: "EUR,0" } });
+  expect(out).toMatchObject({ type: "ticket", data: { costs: { cost: "EUR,0" } } });
 });
 
 test("eventbrite-to-cohost: detects an order", async () => {

@@ -10,10 +10,10 @@
  *     Eventbrite's `gross`, whose tax handling varies by endpoint.
  *   - Eventbrite exposes no order-level discount/delivery, so those are `0`.
  *
- * Line items: Eventbrite carries per-attendee rows; we aggregate them by
- * `ticket_class_id` into Cohost order items (quantity + summed costs).
+ * Line items: one Cohost order item per Eventbrite attendee (keyed by the
+ * attendee id), with per-unit `cost`/`fee`/`tax` and line totals.
  */
-import { amountValue, cohostAmount, cohostToEbAmount } from "./currency.ts";
+import { cohostAmount, cohostToEbAmount } from "./currency.ts";
 import type {
   CohostOrder,
   CohostOrderCosts,
@@ -72,47 +72,46 @@ export function eventbriteOrderToCohost(eb: EbOrder): CohostOrder {
       email: eb.email ?? null,
       uid: null,
     },
-    items: aggregateAttendees(eb.attendees ?? [], currency),
+    items: attendeeItems(eb.attendees ?? [], currency),
     costs,
     source: SOURCE,
     sourceId: eb.id,
   };
 }
 
-/** Group attendees by ticket class into Cohost order items with summed costs. */
-function aggregateAttendees(attendees: EbAttendee[], currency: string): CohostOrderItem[] {
-  const byClass = new Map<string, CohostOrderItem>();
-
-  for (const a of attendees) {
-    const offeringId = a.ticket_class_id ?? "unknown";
-    const qty = a.quantity ?? 1;
+/**
+ * One Cohost order item per Eventbrite attendee, as the old importer did
+ * (`functions/ebrite` formatters/orderItem.ts + cost.ts): the attendee id is the
+ * item id (stable across re-syncs) and its costs are the attendee's, per unit.
+ * Same formulas as the order: fee = eventbrite_fee + payment_fee,
+ * gross = preDiscount = cost + fee, total = gross + tax.
+ */
+function attendeeItems(attendees: EbAttendee[], currency: string): CohostOrderItem[] {
+  return attendees.map((a) => {
+    const quantity = a.quantity ?? 1;
     const cost = a.costs?.base_price?.value ?? 0;
     const fee = (a.costs?.eventbrite_fee?.value ?? 0) + (a.costs?.payment_fee?.value ?? 0);
     const tax = a.costs?.tax?.value ?? 0;
-
-    const existing = byClass.get(offeringId);
-    if (existing) {
-      existing.quantity += qty;
-      existing.costs.cost = cohostAmount(currency, amountValue(existing.costs.cost) + cost);
-      existing.costs.fee = cohostAmount(currency, amountValue(existing.costs.fee) + fee);
-      existing.costs.tax = cohostAmount(currency, amountValue(existing.costs.tax) + tax);
-      existing.costs.gross = cohostAmount(currency, amountValue(existing.costs.gross) + cost + fee);
-    } else {
-      byClass.set(offeringId, {
-        offeringId,
-        name: a.profile?.name,
-        quantity: qty,
-        costs: {
-          cost: cohostAmount(currency, cost),
-          fee: cohostAmount(currency, fee),
-          tax: cohostAmount(currency, tax),
-          gross: cohostAmount(currency, cost + fee),
-        },
-      });
-    }
-  }
-
-  return [...byClass.values()];
+    const amount = (minor: number) => cohostAmount(currency, minor);
+    return {
+      ...(a.id ? { id: a.id } : {}),
+      offeringId: a.ticket_class_id ?? "unknown",
+      offeringType: "admission",
+      ...(a.ticket_class_name ? { name: a.ticket_class_name } : {}),
+      quantity,
+      costs: {
+        cost: amount(cost),
+        fee: amount(fee),
+        tax: amount(tax),
+        delivery: amount(0),
+        discount: amount(0),
+        subtotal: amount(cost * quantity),
+        gross: amount((cost + fee) * quantity),
+        preDiscount: amount((cost + fee) * quantity),
+        total: amount((cost + fee + tax) * quantity),
+      },
+    };
+  });
 }
 
 const COHOST_TO_EB_STATUS: Record<CohostOrderStatus, string> = {
@@ -133,14 +132,15 @@ export function cohostOrderToEventbrite(order: CohostOrder): EbOrder {
   };
 
   const attendees: EbAttendee[] = order.items.map((item) => ({
+    ...(item.id ? { id: item.id } : {}),
     ticket_class_id: item.offeringId,
     quantity: item.quantity,
-    profile: { name: item.name },
+    ...(item.name ? { ticket_class_name: item.name } : {}),
     costs: {
       base_price: cohostToEbAmount(item.costs.cost),
       eventbrite_fee: cohostToEbAmount(item.costs.fee),
       tax: cohostToEbAmount(item.costs.tax),
-      gross: cohostToEbAmount(item.costs.gross),
+      gross: cohostToEbAmount(item.costs.total ?? item.costs.gross),
     },
   }));
 

@@ -55,7 +55,7 @@ parameter or relying on IDs or URLs:
 | Event (`name.text`, `start`, or `end`) | `{ type: "event", urn, data }` — `data` is the Cohost event |
 | Event expanded with `ticket_classes` | `{ type: "event", urn, data }` — mapped tickets stay inside it as `data.tickets` |
 | Ticket class (`cost`, `free`, `donation`, `quantity_total`, or `on_sale_status`) | `{ type: "ticket", urn, data }` — `data` is the Cohost ticket |
-| Order (`costs`, buyer fields, or `attendees` with `id`/`status`) | `{ type: "order", urn, data }` — `data` is the Cohost order; attendees aggregate into `items` |
+| Order (`costs`, buyer fields, or `attendees` with `id`/`status`) | `{ type: "order", urn, data }` — `data` is the Cohost order; each attendee becomes one `items` entry |
 | Array of supported inputs | Array of `{ type, urn, data }` results, in the same order |
 | `{ events: [...], pagination }` | `{ events: [{ type, urn, data }, ...], pagination }` |
 | `{ ticket_classes: [...], pagination }` | `{ tickets: [{ type, urn, data }, ...], pagination }` |
@@ -92,8 +92,8 @@ tickets. The format is `urn:1:<companyId>:<connectionId>:<source-resource-path>`
 Source paths are `/events/<id>`, `/events/<event_id>/ticket_classes/<id>`, and
 `/orders/<id>`. Source IDs are required; standalone tickets also require
 `event_id`, while nested tickets can inherit it from their event. IDs are encoded
-as individual path segments. Listing envelopes and aggregated order items do not
-receive separate URNs.
+as individual path segments. Listing envelopes and order items do not receive
+separate URNs (an item keeps the Eventbrite attendee id as its `id`).
 
 Both IDs are required; the company ID never falls back to the app identifier. The
 company ID above is synthetic; use the owning company's ID for real data.
@@ -137,10 +137,10 @@ Class / Update Ticket Class:
   `startUtc`, `endUtc` (`YYYY-MM-DDThh:mm:ssZ`, no fractional seconds), `timezone`,
   `currency`, `capacity`, `listed` (from `public`).
 - Ticket: `name`, `description`, exactly one of `free` / `donation` / `cost`
-  (`"USD,4500"`), `capacity` (from `quantity`), `hidden`, `salesStart`,
+  (`"USD,4500"`, from `costs.cost`), `capacity`, `hidden`, `salesStart`,
   `salesEnd`, `minimumQuantity`, `maximumQuantity`.
 - `eventId` / `ticketClassId` are set only for objects imported from Eventbrite
-  (from the connection URN, or `sourceId` with source `eventbrite`): present →
+  (from the connection URN, or `refId` with source `eventbrite`): present →
   update, absent → create. Imported tickets also carry their `eventId`.
 - Status, logo and other read-only fields are not included: publish with Publish
   Event, and set a logo through Upload Media + `logoId`.
@@ -150,8 +150,8 @@ Orders stay in Eventbrite's order shape: Eventbrite has no API to create orders.
 Orders require `customer`, `costs`, and an `items` array. Each item requires its
 costs. Standalone attendees and order items must be supplied inside their parent
 order. Both resolvers reject unknown or ambiguous shapes rather than guessing.
-Order round trips preserve mapped quantities and totals, but attendee rows that
-were aggregated by ticket class are not reconstructed individually.
+Order round trips preserve mapped quantities and totals; each item maps back to
+one attendee with its id.
 
 ### Migrating existing workflows
 
@@ -186,8 +186,20 @@ const eventbriteResult = cohostToEventbrite(data); // tickets → ticket_classes
   `eventbrite_fee` with `payment_fee = 0`). Cohost `gross` excludes tax and
   `total` includes it — both recomputed from components. Eventbrite exposes no
   order-level discount/delivery, so those are `0`.
-- **Line items.** Eventbrite carries per-attendee rows; the order transform
-  aggregates them by `ticket_class_id` into Cohost order items.
+- **Tickets.** Cohost tickets take a `costs` object and `capacity` (not
+  `price`/`quantity`), keep the ticket class id as `refId`, and get the category
+  `General Admission`. Only Eventbrite's
+  `cost` carries over — its `fee`/`tax` are Eventbrite's own charges — so
+  `costs.gross` and `costs.total` equal `costs.cost`. `capacity` is Eventbrite's
+  `capacity` (or `quantity_total`); `sales_start`/`sales_end` become
+  `salesStart`/`salesEnd`.
+- **Line items.** One Cohost order item per Eventbrite attendee, `id` = the
+  attendee id (stable across re-syncs), `name` = the ticket class name. `cost`,
+  `fee` and `tax` are per unit; `subtotal` (cost × qty), `gross` = `preDiscount`
+  (cost + fee) × qty, and `total` (gross + tax) are line totals.
+
+  This follows the original Eventbrite importer (`functions/ebrite`, removed
+  2025-08).
 
 These are partial projections — after identifying a supported shape, the mappers
 use defaults for missing fields and ignore extra fields on the input,
