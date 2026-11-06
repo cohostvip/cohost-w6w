@@ -60,6 +60,23 @@ node scripts/build.mjs --cli ../w6w/packages/wrappers/cli/dist/bin/w6w.js -o out
 
 The CLI is `--cli` / `W6W_CLI`, else `w6w` on `PATH`. Run `npm install` in each app first.
 
+## Release
+
+w6w refuses to load an app that declares npm dependencies, so `main` cannot be imported.
+On every push to `main`, [`release.yml`](./.github/workflows/release.yml) tests and bundles each
+app, then publishes dependency-free copies to the generated `release` branch
+(`scripts/assemble-release.mjs`). Never edit that branch by hand.
+
+A w6w operator installs the pack once into the `cohost` tenant:
+
+```http
+POST /apps/import
+{ "source": "github:cohostvip/cohost-w6w@release", "owner": { "tenant": "cohost" } }
+```
+
+An invocation uses the branch's current code. New or changed actions, triggers or auth appear in
+the catalog only after the app is refreshed (`POST /apps/:id/refresh`).
+
 ## License
 
 MIT — see [`LICENSE`](./LICENSE).
