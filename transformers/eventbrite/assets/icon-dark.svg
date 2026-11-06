@@ -1,0 +1,16 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="512" height="512" rx="96" fill="#2a1712"/>
+<!-- Eventbrite orange source disc -->
+<circle cx="150" cy="256" r="70" fill="#f05537"/>
+<!-- Cohost light target disc -->
+<circle cx="362" cy="256" r="70" fill="#f4f4f4"/>
+<!-- Bidirectional transform arrows between the two -->
+<g stroke="#f4f4f4" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none">
+  <path d="M206 214 L306 214"/>
+  <path d="M288 192 L308 214 L288 236"/>
+</g>
+<g stroke="#f05537" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" fill="none">
+  <path d="M306 298 L206 298"/>
+  <path d="M224 276 L204 298 L224 320"/>
+</g>
+</svg>
