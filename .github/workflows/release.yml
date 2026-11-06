@@ -1,0 +1,63 @@
+name: Release apps
+
+# On every push to main: test and bundle each app in w6w-pack.json, then publish the
+# result to the `release` branch, which w6w imports as github:cohostvip/cohost-w6w@release.
+# `main` itself cannot be imported, because w6w refuses apps that declare npm dependencies.
+# See scripts/assemble-release.mjs and "Release" in README.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-apps
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # A fork's release branch is not what w6w imports.
+    if: github.repository == 'cohostvip/cohost-w6w'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install, type-check and test each app
+        run: |
+          for app in $(node -p "require('./w6w-pack.json').apps.map((a) => a.path).join(' ')"); do
+            echo "::group::$app"
+            (cd "$app" && npm ci && npm run check && npm test)
+            echo "::endgroup::"
+          done
+
+      - name: Assemble the release
+        run: node scripts/assemble-release.mjs --out "$RUNNER_TEMP/release-out"
+
+      - name: Publish to the release branch
+        run: |
+          tree="$RUNNER_TEMP/release-branch"
+          if git ls-remote --exit-code --heads origin release >/dev/null; then
+            git fetch --depth=1 origin release
+            git worktree add -B release "$tree" FETCH_HEAD
+          else
+            git worktree add --orphan -b release "$tree"
+          fi
+          find "$tree" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$RUNNER_TEMP/release-out/." "$tree/"
+          cd "$tree"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "release is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -m "release: ${GITHUB_SHA::7}"
+          git push origin release
