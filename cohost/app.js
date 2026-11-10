@@ -170,6 +170,7 @@ var ID = {
   event: "SampleEvent01",
   ticket: "SampleTicket01",
   order: "SampleOrder01",
+  attendee: "SampleOrderItem01.0",
   venue: "ven_sample"
 };
 var COSTS_HINT = "(e.g. USD,5500)";
@@ -523,6 +524,69 @@ var TICKET_CHANGED_SAMPLE = {
   ]),
   ticket: TICKET_SAMPLE
 };
+var ATTENDEE_OUTPUT = [
+  s("id", "Attendee ID"),
+  s("orderId", "Order ID"),
+  s("orderNumber", "Order number"),
+  s("orderItemId", "Order item ID"),
+  n("index", "Index within the order item"),
+  s("offeringId", "Ticket ID"),
+  s("status", "Status (attending, \u2026)"),
+  s("source", "Source (online, imported, offline, onsite)"),
+  b("checkedIn", "Checked in"),
+  s("uid", "User ID"),
+  a("barcodes", "Barcodes"),
+  o("profile", "Attendee profile"),
+  s("profile.first", "First name"),
+  s("profile.last", "Last name"),
+  s("profile.name", "Full name"),
+  s("profile.email", "Email"),
+  s("profile.phone", "Phone"),
+  o("offeringSnapshot", "Ticket at purchase"),
+  s("offeringSnapshot.id", "Ticket ID"),
+  s("offeringSnapshot.name", "Ticket name"),
+  s("offeringSnapshot.type", "Ticket type (admission, \u2026)"),
+  s("offeringSnapshot.category", "Ticket category"),
+  s("created", "Created (UTC)"),
+  s("changed", "Changed (UTC)")
+];
+var ATTENDEE_SAMPLE = {
+  id: ID.attendee,
+  orderId: ID.order,
+  orderNumber: "100123",
+  orderItemId: "SampleOrderItem01",
+  index: 0,
+  offeringId: ID.ticket,
+  status: "attending",
+  source: "online",
+  checkedIn: false,
+  uid: "usr_sample",
+  barcodes: ["SAMPLEBARCODE01"],
+  profile: {
+    first: "Sam",
+    last: "Sample",
+    name: "Sam Sample",
+    email: "sam@example.com",
+    phone: "+15555550100"
+  },
+  offeringSnapshot: {
+    id: ID.ticket,
+    name: "General Admission",
+    type: "admission",
+    category: "General"
+  },
+  created: "2026-11-01T20:34:09.000Z",
+  changed: "2026-11-01T20:34:09.000Z"
+};
+var ATTENDEE_CHANGED_OUTPUT = [
+  ...notificationOutput,
+  o("attendee", "Attendee (null once deleted)"),
+  ...prefixOutput("attendee", ATTENDEE_OUTPUT)
+];
+var ATTENDEE_CHANGED_SAMPLE = {
+  ...notificationSample("attendee", "created", `/events/${ID.event}/attendees/${ID.attendee}`, []),
+  attendee: ATTENDEE_SAMPLE
+};
 
 // triggers/order-placed.ts
 function orderIdFromPath(resourcePath) {
@@ -705,6 +769,46 @@ var ticketChanged = {
 };
 var ticket_changed_default = ticketChanged;
 
+// triggers/attendee-changed.ts
+var ACTIONS3 = ["created", "checked_in", "deleted"];
+var DEFAULT_ACTIONS2 = ["created"];
+var attendeeChanged = {
+  key: "attendee-changed",
+  title: "Attendee Changed",
+  description: "Fires when a Cohost attendee is created (one per ticket on a placed order), checked in or deleted.",
+  params: [
+    {
+      key: "actions",
+      label: "Actions",
+      type: "multiselect",
+      hint: "Leave empty for Created only.",
+      default: [...DEFAULT_ACTIONS2],
+      options: [
+        { value: "created", label: "Created" },
+        { value: "checked_in", label: "Checked in" },
+        { value: "deleted", label: "Deleted" }
+      ]
+    }
+  ],
+  output: ATTENDEE_CHANGED_OUTPUT,
+  sample: ATTENDEE_CHANGED_SAMPLE,
+  async onSubscribe({ params, callbackUrl }, ctx) {
+    const events = pickValues("actions", params.actions, ACTIONS3, DEFAULT_ACTIONS2).map((a2) => `attendee.${a2}`);
+    return subscribeWebhook(ctx, "w6w: attendee changed", callbackUrl, events);
+  },
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
+  },
+  async handleIngest({ raw }, ctx) {
+    const change = toNotification(raw);
+    const attendee = change.action === "deleted" || !change.eventId ? null : await new CohostClient(ctx).request(
+      `/events/${encodeURIComponent(change.eventId)}/attendees/${encodeURIComponent(change.id)}`
+    );
+    return [{ ...change, attendee }];
+  }
+};
+var attendee_changed_default = attendeeChanged;
+
 // triggers/object-changed.ts
 var EVENTS = {
   event: ["created", "updated", "deleted", "published"],
@@ -713,11 +817,11 @@ var EVENTS = {
   attendee: ["created", "deleted", "checked_in"]
 };
 var TYPES = Object.keys(EVENTS);
-var ACTIONS3 = [...new Set(Object.values(EVENTS).flat())];
-var DEFAULT_ACTIONS2 = ["created", "updated", "deleted"];
+var ACTIONS4 = [...new Set(Object.values(EVENTS).flat())];
+var DEFAULT_ACTIONS3 = ["created", "updated", "deleted"];
 function webhookEvents(params) {
   const types = pickValues("types", params.types, TYPES, TYPES);
-  const actions = pickValues("actions", params.actions, ACTIONS3, DEFAULT_ACTIONS2);
+  const actions = pickValues("actions", params.actions, ACTIONS4, DEFAULT_ACTIONS3);
   const events = types.flatMap((t) => actions.filter((a2) => EVENTS[t].includes(a2)).map((a2) => `${t}.${a2}`));
   if (events.length === 0) {
     throw new TypeError(`Cohost emits none of ${actions.join(", ")} for ${types.join(", ")}.`);
@@ -747,7 +851,7 @@ var objectChanged = {
       label: "Actions",
       type: "multiselect",
       hint: "Leave empty for created, updated and deleted.",
-      default: [...DEFAULT_ACTIONS2],
+      default: [...DEFAULT_ACTIONS3],
       options: [
         { value: "created", label: "Created" },
         { value: "updated", label: "Updated" },
@@ -1066,6 +1170,28 @@ var listEventAttendees = {
   }
 };
 var list_event_attendees_default = listEventAttendees;
+
+// actions/get-event-attendee.ts
+var getEventAttendee = {
+  key: "get-event-attendee",
+  type: "read",
+  resource: "attendee",
+  title: "Get Event Attendee",
+  description: "Fetch one attendee on a Cohost event by id or URN.",
+  params: [
+    { key: "event", label: "Event (ID or URN)", type: "string", required: true },
+    { key: "attendee", label: "Attendee (ID or URN)", type: "string", required: true }
+  ],
+  output: ATTENDEE_OUTPUT,
+  async execute(input, ctx) {
+    ctx.log("info", "fetching event attendee", { event: input.event, attendee: input.attendee });
+    const client = new CohostClient(ctx);
+    return client.request(
+      `/events/${encodeURIComponent(resourceId(input.event, "events"))}/attendees/${encodeURIComponent(resourceId(input.attendee, "attendees"))}`
+    );
+  }
+};
+var get_event_attendee_default = getEventAttendee;
 
 // actions/list-event-tickets.ts
 var listEventTickets = {
@@ -2255,6 +2381,7 @@ var index_default = {
     update_event_default,
     get_event_blocks_default,
     list_event_attendees_default,
+    get_event_attendee_default,
     // tickets
     list_event_tickets_default,
     get_event_ticket_default,
@@ -2290,7 +2417,7 @@ var index_default = {
     friendly_value_default,
     friendly_data_default
   ].map(withFriendlyOutput),
-  triggers: [order_placed_default, order_changed_default, order_confirmation_requested_default, event_changed_default, ticket_changed_default, object_changed_default],
+  triggers: [order_placed_default, order_changed_default, order_confirmation_requested_default, event_changed_default, ticket_changed_default, attendee_changed_default, object_changed_default],
   auth: [tenant_default, api_token_default]
 };
 export {
