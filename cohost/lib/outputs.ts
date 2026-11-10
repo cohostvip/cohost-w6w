@@ -10,6 +10,7 @@ import { notificationOutput } from "./notification.ts";
  *     (`organizer` / `transaction` are always `null` today; `transactions` drops `raw`).
  *   - `GET /events/{id}` → the event profile.
  *   - `GET /events/{id}/tickets/{ticketId}` → the ticket (an offering).
+ *   - `GET /events/{id}/attendees/{attendeeId}` → the attendee.
  * Order fields were taken from real orders; only the commonly used ones are declared — the
  * payload carries more (e.g. `order.meta.costBreakdown`), reachable by path.
  *
@@ -37,6 +38,7 @@ const ID = {
   event: "SampleEvent01",
   ticket: "SampleTicket01",
   order: "SampleOrder01",
+  attendee: "SampleOrderItem01.0",
   venue: "ven_sample",
 } as const;
 
@@ -421,4 +423,76 @@ export const TICKET_CHANGED_SAMPLE = {
     "changed",
   ]),
   ticket: TICKET_SAMPLE,
+};
+
+// ---- attendee -------------------------------------------------------------------------------
+
+/**
+ * An attendee — one per admission an order produced (`<orderItemId>.<index>`), or one imported /
+ * added by hand. Keys taken from real attendee records.
+ */
+export const ATTENDEE_OUTPUT: OutputField[] = [
+  s("id", "Attendee ID"),
+  s("orderId", "Order ID"),
+  s("orderNumber", "Order number"),
+  s("orderItemId", "Order item ID"),
+  n("index", "Index within the order item"),
+  s("offeringId", "Ticket ID"),
+  s("status", "Status (attending, …)"),
+  s("source", "Source (online, imported, offline, onsite)"),
+  b("checkedIn", "Checked in"),
+  s("uid", "User ID"),
+  a("barcodes", "Barcodes"),
+  o("profile", "Attendee profile"),
+  s("profile.first", "First name"),
+  s("profile.last", "Last name"),
+  s("profile.name", "Full name"),
+  s("profile.email", "Email"),
+  s("profile.phone", "Phone"),
+  o("offeringSnapshot", "Ticket at purchase"),
+  s("offeringSnapshot.id", "Ticket ID"),
+  s("offeringSnapshot.name", "Ticket name"),
+  s("offeringSnapshot.type", "Ticket type (admission, …)"),
+  s("offeringSnapshot.category", "Ticket category"),
+  s("created", "Created (UTC)"),
+  s("changed", "Changed (UTC)"),
+];
+
+export const ATTENDEE_SAMPLE = {
+  id: ID.attendee,
+  orderId: ID.order,
+  orderNumber: "100123",
+  orderItemId: "SampleOrderItem01",
+  index: 0,
+  offeringId: ID.ticket,
+  status: "attending",
+  source: "online",
+  checkedIn: false,
+  uid: "usr_sample",
+  barcodes: ["SAMPLEBARCODE01"],
+  profile: {
+    first: "Sam",
+    last: "Sample",
+    name: "Sam Sample",
+    email: "sam@example.com",
+    phone: "+15555550100",
+  },
+  offeringSnapshot: {
+    id: ID.ticket,
+    name: "General Admission",
+    type: "admission",
+    category: "General",
+  },
+  created: "2026-11-01T20:34:09.000Z",
+  changed: "2026-11-01T20:34:09.000Z",
+};
+
+export const ATTENDEE_CHANGED_OUTPUT: OutputField[] = [
+  ...notificationOutput,
+  o("attendee", "Attendee (null once deleted)"),
+  ...prefixOutput("attendee", ATTENDEE_OUTPUT),
+];
+export const ATTENDEE_CHANGED_SAMPLE = {
+  ...notificationSample("attendee", "created", `/events/${ID.event}/attendees/${ID.attendee}`, []),
+  attendee: ATTENDEE_SAMPLE,
 };

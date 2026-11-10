@@ -35,6 +35,7 @@ cohost/
 │   ├── order-confirmation-requested.ts   # fires on `order.confirmation-requested`
 │   ├── event-changed.ts                  # fires on `event.*`
 │   ├── ticket-changed.ts                 # fires on `offering.*`
+│   ├── attendee-changed.ts               # fires on `attendee.*` (one per attendee an order creates)
 │   └── object-changed.ts                 # general: any picked type × action
 └── lib/
     ├── client.ts            # thin ctx.fetch wrapper over api.cohost.vip
@@ -60,6 +61,10 @@ cohost/
 - **Ticket Changed** — fires on `offering.created` / `updated` / `deleted` (tickets
   are offerings on the platform). Sends the change plus the current ticket (`null`
   once deleted).
+- **Attendee Changed** — fires on `attendee.created` / `checked_in` / `deleted`
+  (created only by default). A placed order creates one attendee per admission, so a
+  3-ticket order runs the workflow three times — once per guest. Sends the change plus
+  the current attendee (`null` once deleted); its `orderId` leads to `get-order`.
 - **Object Changed** — the general trigger. Pick the types (event, ticket/offering,
   order, attendee) and actions (created, updated, deleted by default; also published,
   placed, refunded, checked in); it subscribes to every combination Cohost emits.
@@ -98,6 +103,7 @@ Every trigger declares its payload as `output` plus a synthetic `sample`
 | `update-event` | `PATCH /events/{id}` |
 | `get-event-blocks` | `GET /events/{id}/blocks` |
 | `list-event-attendees` | `GET /events/{id}/attendees` |
+| `get-event-attendee` | `GET /events/{id}/attendees/{attendeeId}` |
 
 ### Tickets (`resource: ticket`)
 
