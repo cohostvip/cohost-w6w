@@ -892,25 +892,18 @@ var paginationParams = [
     type: "number",
     hint: "Results per page.",
     validation: { integer: true, min: 1 }
-  },
-  {
-    key: "continuation",
-    label: "Continuation Token",
-    type: "string",
-    hint: "Opaque cursor returned by a previous page."
   }
 ];
+var DEFAULT_PAGE_SIZE = 20;
 var paginationQuery = (input) => ({
   page: input.page,
-  size: input.size,
-  continuation: input.continuation
+  size: input.size ?? (input.page === void 0 ? void 0 : DEFAULT_PAGE_SIZE)
 });
 var paginatedOutput = (label) => [
   { key: "results", type: "array", label },
   { key: "pagination.page", type: "number", label: "Page" },
   { key: "pagination.size", type: "number", label: "Page Size" },
-  { key: "pagination.total", type: "number", label: "Total" },
-  { key: "pagination.continuation", type: "string", label: "Continuation Token" }
+  { key: "pagination.total", type: "number", label: "Total" }
 ];
 var contextParam = {
   key: "context",
@@ -1036,29 +1029,31 @@ var getEvent = {
 var get_event_default = getEvent;
 
 // actions/search-events.ts
+var MAX_SIZE = 100;
+var DEFAULT_SIZE = 20;
 var searchEvents = {
   key: "search-events",
   type: "search",
   resource: "event",
   title: "Search Events",
-  description: "Search Cohost events, paginated.",
+  description: "Search Cohost events by text, paginated.",
   params: [
-    { key: "q", label: "Query", type: "string", hint: "Free-text search term." },
-    ...paginationParams,
-    {
-      key: "filters",
-      label: "Filters",
-      type: "json",
-      hint: "Optional key/value object appended to the query string."
-    }
+    { key: "q", label: "Query", type: "string", required: true, hint: "Free-text search term." },
+    ...paginationParams
   ],
   output: paginatedOutput("Events"),
   async execute(input, ctx) {
     ctx.log("info", "searching events", { q: input.q });
+    const { page = 1, size = DEFAULT_SIZE } = paginationQuery(input);
+    const limit = Math.min(size, MAX_SIZE);
     const client = new CohostClient(ctx);
-    return client.request("/events/search", {
-      query: { q: input.q, ...input.filters, ...paginationQuery(input) }
+    const res = await client.request("/search", {
+      query: { q: input.q, types: "event", limit, offset: (page - 1) * limit }
     });
+    return {
+      results: res.results.map(({ entityId, id: _indexRowId, ...hit }) => ({ ...hit, id: entityId })),
+      pagination: { page, size: limit, total: res.total }
+    };
   }
 };
 var search_events_default = searchEvents;
