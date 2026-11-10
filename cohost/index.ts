@@ -6,6 +6,7 @@ import orderChanged from "./triggers/order-changed.ts";
 import orderConfirmationRequested from "./triggers/order-confirmation-requested.ts";
 import eventChanged from "./triggers/event-changed.ts";
 import ticketChanged from "./triggers/ticket-changed.ts";
+import attendeeChanged from "./triggers/attendee-changed.ts";
 import objectChanged from "./triggers/object-changed.ts";
 
 // Events
@@ -16,6 +17,7 @@ import createEvent from "./actions/create-event.ts";
 import updateEvent from "./actions/update-event.ts";
 import getEventBlocks from "./actions/get-event-blocks.ts";
 import listEventAttendees from "./actions/list-event-attendees.ts";
+import getEventAttendee from "./actions/get-event-attendee.ts";
 
 // Tickets (nested under events)
 import listEventTickets from "./actions/list-event-tickets.ts";
@@ -63,8 +65,8 @@ import { withFriendlyOutput } from "./lib/friendly-output.ts";
  * The Cohost w6w app.
  *
  * Triggers are how workflows *start* (`order-placed`, `order-changed`,
- * `order-confirmation-requested`, `event-changed`, `ticket-changed` and the
- * general `object-changed`); actions are how they read and write
+ * `order-confirmation-requested`, `event-changed`, `ticket-changed`,
+ * `attendee-changed` and the general `object-changed`); actions are how they read and write
  * Cohost. The action set mirrors the **backend-ops** slice of the public API
  * surface published by `@cohostvip/cohost-node` — events, tickets, orders,
  * coupons, organizers and users — catalogued in
@@ -119,6 +121,7 @@ export default {
     updateEvent,
     getEventBlocks,
     listEventAttendees,
+    getEventAttendee,
     // tickets
     listEventTickets,
     getEventTicket,
@@ -154,6 +157,6 @@ export default {
     friendlyValue,
     friendlyData,
   ].map(withFriendlyOutput),
-  triggers: [orderPlaced, orderChanged, orderConfirmationRequested, eventChanged, ticketChanged, objectChanged],
+  triggers: [orderPlaced, orderChanged, orderConfirmationRequested, eventChanged, ticketChanged, attendeeChanged, objectChanged],
   auth: [tenant, apiToken],
 } satisfies AppDefinition;

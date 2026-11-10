@@ -14,8 +14,10 @@ test("action keys are unique", () => {
 
 test("one action per backend-ops SDK endpoint", () => {
   // The `format` actions are local conversions and the `urn` actions read private
-  // endpoints — neither is an SDK endpoint.
-  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(28);
+  // endpoints — neither is an SDK endpoint. 29 = the 28 catalogued endpoints plus
+  // `get-event-attendee` (`GET /events/{id}/attendees/{attendeeId}`), public but not yet
+  // wrapped by the Node SDK.
+  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(29);
 });
 
 test("every fetch action takes a friendly flag, off by default", () => {

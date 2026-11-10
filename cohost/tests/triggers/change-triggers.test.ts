@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { mockCtx } from "../_helpers.ts";
 import eventChanged from "../../triggers/event-changed.ts";
 import ticketChanged from "../../triggers/ticket-changed.ts";
+import attendeeChanged from "../../triggers/attendee-changed.ts";
 import objectChanged, { webhookEvents } from "../../triggers/object-changed.ts";
 import app from "../../index.ts";
 
@@ -30,7 +31,7 @@ async function subscribedEvents(trigger: typeof eventChanged | typeof objectChan
 
 test("the app registers the event, ticket and general change triggers", () => {
   expect(app.triggers.map((t) => t.key)).toEqual(
-    expect.arrayContaining(["event-changed", "ticket-changed", "object-changed"]),
+    expect.arrayContaining(["event-changed", "ticket-changed", "attendee-changed", "object-changed"]),
   );
 });
 
@@ -86,6 +87,39 @@ test("ticket-changed: subscribes to offering.* and fetches the ticket under its 
   );
   expect(new URL(calls[0].url).pathname).toBe("/v1/events/ev_1/tickets/tk_1");
   expect(out).toMatchObject({ type: "offering", action: "created", id: "tk_1", eventId: "ev_1", ticket });
+});
+
+test("attendee-changed: subscribes to attendee.created by default, or the picked actions", async () => {
+  expect(await subscribedEvents(attendeeChanged as never, {})).toEqual(["attendee.created"]);
+  expect(await subscribedEvents(attendeeChanged as never, { actions: ["created", "checked_in", "deleted"] })).toEqual([
+    "attendee.created",
+    "attendee.checked_in",
+    "attendee.deleted",
+  ]);
+  await expect(
+    attendeeChanged.onSubscribe!({ params: { actions: ["updated"] }, ...SUB }, mockCtx().ctx),
+  ).rejects.toThrow();
+});
+
+test("attendee-changed: fetches each attendee an order creates, under its event", async () => {
+  const attendee = { id: "item_1.0", orderId: "ord_1", profile: { email: "a@example.com" } };
+  const { ctx, calls } = mockCtx([{ body: { status: "ok", data: attendee } }]);
+  const [out] = await attendeeChanged.handleIngest(
+    { raw: { body: ping("attendee.created", "/events/ev_1/attendees/item_1.0") }, params: {}, state: { webhookId: "wh_1" }, subscriptionId: "sub_1" },
+    ctx,
+  );
+  expect(new URL(calls[0].url).pathname).toBe("/v1/events/ev_1/attendees/item_1.0");
+  expect(out).toMatchObject({ type: "attendee", action: "created", id: "item_1.0", eventId: "ev_1", attendee });
+});
+
+test("attendee-changed: a deleted attendee is not fetched", async () => {
+  const { ctx, calls } = mockCtx();
+  const [out] = await attendeeChanged.handleIngest(
+    { raw: { body: ping("attendee.deleted", "/events/ev_1/attendees/item_1.0") }, params: {}, state: { webhookId: "wh_1" }, subscriptionId: "sub_1" },
+    ctx,
+  );
+  expect(calls).toHaveLength(0);
+  expect(out).toMatchObject({ action: "deleted", attendee: null });
 });
 
 test("ticket-changed: a deleted ticket is not fetched", async () => {
@@ -145,7 +179,7 @@ test("object-changed: an order has no parent event id", async () => {
 });
 
 test("change triggers: onUnsubscribe DELETEs the webhook", async () => {
-  for (const trigger of [eventChanged, ticketChanged, objectChanged]) {
+  for (const trigger of [eventChanged, ticketChanged, attendeeChanged, objectChanged]) {
     const { ctx, calls } = mockCtx([{ status: 200 }]);
     await trigger.onUnsubscribe!({ params: {}, state: { webhookId: "wh_9" }, subscriptionId: "sub_1" }, ctx);
     expect(calls[0].method).toBe("DELETE");

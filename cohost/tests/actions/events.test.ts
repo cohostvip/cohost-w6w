@@ -9,6 +9,7 @@ import getEventBlocks from "../../actions/get-event-blocks.ts";
 import listEventAttendees from "../../actions/list-event-attendees.ts";
 import listEventTickets from "../../actions/list-event-tickets.ts";
 import getEventTicket from "../../actions/get-event-ticket.ts";
+import getEventAttendee from "../../actions/get-event-attendee.ts";
 import createEventTickets from "../../actions/create-event-tickets.ts";
 import updateEventTicket from "../../actions/update-event-ticket.ts";
 import deleteEventTicket from "../../actions/delete-event-ticket.ts";
@@ -97,6 +98,19 @@ test("get-event-ticket: GETs /events/{event}/tickets/{ticket}, extracting IDs fr
   const urn = "urn:1:co:cohost-falcon:/events/evt_1/tickets/t";
   await getEventTicket.execute({ event: "evt_1", ticket: urn }, ctx);
   expect(new URL(calls[1].url).pathname).toBe("/v1/events/evt_1/tickets/t");
+});
+
+test("get-event-attendee: GETs /events/{event}/attendees/{attendee}, extracting IDs from URNs", async () => {
+  const { ctx, calls } = mockCtx([{ body: { status: "ok", data: { id: "item_1.0" } } }, { body: {} }]);
+  const out = await getEventAttendee.execute({ event: "evt_1", attendee: "item_1.0" }, ctx);
+  expect(calls[0].method).toBe("GET");
+  expect(new URL(calls[0].url).pathname).toBe("/v1/events/evt_1/attendees/item_1.0");
+  expect(out).toEqual({ id: "item_1.0" });
+  await getEventAttendee.execute(
+    { event: "urn:1:co:cohost-falcon:/events/evt_1", attendee: "urn:1:co:cohost-falcon:/events/evt_1/attendees/a1" },
+    ctx,
+  );
+  expect(new URL(calls[1].url).pathname).toBe("/v1/events/evt_1/attendees/a1");
 });
 
 test("create-event-tickets: a single ticket is sent as { ticket }", async () => {
