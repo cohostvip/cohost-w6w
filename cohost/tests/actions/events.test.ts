@@ -40,12 +40,39 @@ test("get-event: GETs /events/{id}", async () => {
   expect((out as { id: string }).id).toBe("evt_1");
 });
 
-test("search-events: GETs /events/search with q", async () => {
-  const { ctx, calls } = mockCtx([{ body: [] }]);
-  await searchEvents.execute({ q: "concert" }, ctx);
+const searchBody = (results: unknown[], total: number, limit: number, offset: number) => ({
+  status: "ok",
+  data: { results, total, countsByEntityType: { event: total }, limit, offset },
+});
+
+test("search-events: GETs /search for events, mapping page/size onto limit/offset", async () => {
+  const { ctx, calls } = mockCtx([
+    { body: searchBody([{ id: "si_1", entityType: "event", entityId: "evt_6", title: "Concert" }], 13, 5, 5) },
+  ]);
+  const out = await searchEvents.execute({ q: "concert", page: 2, size: 5 }, ctx);
   const url = new URL(calls[0].url);
-  expect(url.pathname).toBe("/v1/events/search");
+  expect(url.pathname).toBe("/v1/search");
   expect(url.searchParams.get("q")).toBe("concert");
+  expect(url.searchParams.get("types")).toBe("event");
+  expect(url.searchParams.get("limit")).toBe("5");
+  expect(url.searchParams.get("offset")).toBe("5");
+  expect(out).toEqual({
+    results: [{ id: "evt_6", entityType: "event", title: "Concert" }],
+    pagination: { page: 2, size: 5, total: 13 },
+  });
+});
+
+test("search-events: defaults to page 1 / size 20 and clamps size to 100", async () => {
+  const { ctx, calls } = mockCtx([{ body: searchBody([], 0, 20, 0) }, { body: searchBody([], 0, 100, 0) }]);
+  const first = await searchEvents.execute({ q: "x" }, ctx);
+  expect(new URL(calls[0].url).searchParams.get("limit")).toBe("20");
+  expect(new URL(calls[0].url).searchParams.get("offset")).toBe("0");
+  expect(first).toEqual({ results: [], pagination: { page: 1, size: 20, total: 0 } });
+
+  const clamped = await searchEvents.execute({ q: "x", page: 3, size: 500 }, ctx);
+  expect(new URL(calls[1].url).searchParams.get("limit")).toBe("100");
+  expect(new URL(calls[1].url).searchParams.get("offset")).toBe("200");
+  expect(clamped).toMatchObject({ pagination: { page: 3, size: 100 } });
 });
 
 test("create-event: POSTs /events with the { event, context } wrapper", async () => {
@@ -80,6 +107,33 @@ test("list-event-attendees: GETs /events/{id}/attendees", async () => {
   const url = new URL(calls[0].url);
   expect(url.pathname).toBe("/v1/events/evt_1/attendees");
   expect(url.searchParams.get("page")).toBe("2");
+  // A page without a size still pages — the attendees endpoint only paginates on a size.
+  expect(url.searchParams.get("size")).toBe("20");
+});
+
+test("list-event-attendees: forwards page + size and unwraps the page", async () => {
+  const { ctx, calls } = mockCtx([
+    { body: { status: "ok", data: [{ id: "a.5" }], pagination: { page: 2, size: 5, total: 13, pageCount: 3 } } },
+  ]);
+  const out = await listEventAttendees.execute({ event: "evt_1", page: 2, size: 5 }, ctx);
+  const url = new URL(calls[0].url);
+  expect(url.searchParams.get("page")).toBe("2");
+  expect(url.searchParams.get("size")).toBe("5");
+  expect(out).toEqual({ results: [{ id: "a.5" }], pagination: { page: 2, size: 5, total: 13, pageCount: 3 } });
+});
+
+test("list-event-attendees: sends no pagination when none is set (full list)", async () => {
+  const { ctx, calls } = mockCtx([{ body: [] }]);
+  await listEventAttendees.execute({ event: "evt_1" }, ctx);
+  expect(new URL(calls[0].url).search).toBe("");
+});
+
+test("pagination params: page + size only — no continuation token (no endpoint issues one)", () => {
+  for (const action of [listEvents, listEventAttendees, searchEvents]) {
+    const keys = (action.params ?? []).map((p) => p.key);
+    expect(keys).toEqual(expect.arrayContaining(["page", "size"]));
+    expect(keys).not.toContain("continuation");
+  }
 });
 
 test("list-event-tickets: wraps the bare array as { results }", async () => {

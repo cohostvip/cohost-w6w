@@ -98,7 +98,7 @@ Every trigger declares its payload as `output` plus a synthetic `sample`
 | --- | --- |
 | `list-events` | `GET /events` |
 | `get-event` | `GET /events/{id}` |
-| `search-events` | `GET /events/search` |
+| `search-events` | `GET /search?types=event` (`page`/`size` mapped onto `limit`/`offset`) |
 | `create-event` | `POST /events` |
 | `update-event` | `PATCH /events/{id}` |
 | `get-event-blocks` | `GET /events/{id}/blocks` |
