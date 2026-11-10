@@ -1,14 +1,14 @@
 /**
  * Shared param/output fragments.
  *
- * The Cohost API speaks two pagination dialects (see `.claude/docs/SDK_ENDPOINTS.md`):
- *   - `page` / `size` / `continuation` — everywhere except `/users`
- *   - `limit` / `offset`               — only `/users`
- * Both are modelled here so an action never hand-rolls them.
+ * The Cohost list endpoints paginate with 1-based `page` + `size` (offset pagination —
+ * no endpoint issues a continuation cursor). `/search` speaks `limit` / `offset`;
+ * `search-events` maps `page` / `size` onto it so every list action takes the same
+ * inputs and returns the same `pagination` shape.
  */
 import type { OutputField, Param } from "@w6w/types";
 
-/** `page` / `size` / `continuation` — the platform-standard dialect. */
+/** `page` / `size` — the platform-standard dialect. */
 export const paginationParams: Param[] = [
   {
     key: "page",
@@ -24,26 +24,25 @@ export const paginationParams: Param[] = [
     hint: "Results per page.",
     validation: { integer: true, min: 1 },
   },
-  {
-    key: "continuation",
-    label: "Continuation Token",
-    type: "string",
-    hint: "Opaque cursor returned by a previous page.",
-  },
 ];
 
 /** Input shape contributed by {@link paginationParams}. */
 export interface PaginationInput {
   page?: number;
   size?: number;
-  continuation?: string;
 }
 
-/** Project {@link PaginationInput} onto the query string the API expects. */
+/** Page size sent when a caller picks a page but no size — the API's own default. */
+export const DEFAULT_PAGE_SIZE = 20;
+
+/**
+ * Project {@link PaginationInput} onto the query string the API expects. A `page` without
+ * a `size` gets {@link DEFAULT_PAGE_SIZE}: some endpoints (event attendees) only paginate
+ * when a size is present, and would otherwise return every row for any page.
+ */
 export const paginationQuery = (input: PaginationInput) => ({
   page: input.page,
-  size: input.size,
-  continuation: input.continuation,
+  size: input.size ?? (input.page === undefined ? undefined : DEFAULT_PAGE_SIZE),
 });
 
 /** Output of a `page`/`size` paginated list, post envelope-unwrap. */
@@ -52,7 +51,6 @@ export const paginatedOutput = (label: string): OutputField[] => [
   { key: "pagination.page", type: "number", label: "Page" },
   { key: "pagination.size", type: "number", label: "Page Size" },
   { key: "pagination.total", type: "number", label: "Total" },
-  { key: "pagination.continuation", type: "string", label: "Continuation Token" },
 ];
 
 /** `?context=` free-form passthrough accepted by every event/ticket write. */
