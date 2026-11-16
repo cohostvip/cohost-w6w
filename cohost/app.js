@@ -105,35 +105,6 @@ var tenant_default = tenant;
 function pingOf(raw) {
   return raw.body;
 }
-function toNotification(raw) {
-  const ping = pingOf(raw);
-  const dot = ping.action.indexOf(".");
-  const segments = ping.context.resourcePath.split("/").filter(Boolean);
-  return {
-    urn: ping.urn,
-    type: ping.action.slice(0, dot),
-    action: ping.action.slice(dot + 1),
-    webhookEvent: ping.action,
-    id: segments[segments.length - 1],
-    ...segments[0] === "events" && segments[1] ? { eventId: segments[1] } : {},
-    resourcePath: ping.context.resourcePath,
-    companyId: ping.context.companyId,
-    changedFields: ping.data?.changedFields ?? [],
-    timestamp: ping.timestamp
-  };
-}
-var notificationOutput = [
-  { key: "urn", type: "string", label: "URN" },
-  { key: "type", type: "string", label: "Type" },
-  { key: "action", type: "string", label: "Action" },
-  { key: "webhookEvent", type: "string", label: "Webhook Event" },
-  { key: "id", type: "string", label: "ID" },
-  { key: "eventId", type: "string", label: "Event ID" },
-  { key: "resourcePath", type: "string", label: "Resource Path" },
-  { key: "companyId", type: "string", label: "Company ID" },
-  { key: "changedFields", type: "array", label: "Changed Fields (e.g. costs, costs.tax)" },
-  { key: "timestamp", type: "string", label: "Timestamp" }
-];
 async function subscribeWebhook(ctx, name, callbackUrl, events) {
   const client = new CohostClient(ctx);
   const webhook = await client.request("/webhooks", {
@@ -479,51 +450,6 @@ var ORDER_DETAILS_SAMPLE = {
     }
   ]
 };
-function notificationSample(type, action, resourcePath, changedFields) {
-  const segments = resourcePath.split("/").filter(Boolean);
-  return {
-    urn: `urn:1:${ID.company}:cohost-falcon:${resourcePath}`,
-    type,
-    action,
-    webhookEvent: `${type}.${action}`,
-    id: segments[segments.length - 1],
-    ...segments[0] === "events" && segments[1] ? { eventId: segments[1] } : {},
-    resourcePath,
-    companyId: ID.company,
-    changedFields,
-    timestamp: "2026-11-01T20:34:10.000Z"
-  };
-}
-var OBJECT_CHANGED_OUTPUT = notificationOutput;
-var OBJECT_CHANGED_SAMPLE = notificationSample(
-  "offering",
-  "updated",
-  `/events/${ID.event}/tickets/${ID.ticket}`,
-  ["capacity"]
-);
-var EVENT_CHANGED_OUTPUT = [
-  ...notificationOutput,
-  o("event", "Event (null once deleted)"),
-  ...prefixOutput("event", EVENT_OUTPUT)
-];
-var EVENT_CHANGED_SAMPLE = {
-  ...notificationSample("event", "updated", `/events/${ID.event}`, ["name", "start"]),
-  event: EVENT_SAMPLE
-};
-var TICKET_CHANGED_OUTPUT = [
-  ...notificationOutput,
-  o("ticket", "Ticket (null once deleted)"),
-  ...prefixOutput("ticket", TICKET_OUTPUT)
-];
-var TICKET_CHANGED_SAMPLE = {
-  ...notificationSample("offering", "updated", `/events/${ID.event}/tickets/${ID.ticket}`, [
-    "costs",
-    "costs.tax",
-    "costs.total",
-    "changed"
-  ]),
-  ticket: TICKET_SAMPLE
-};
 var ATTENDEE_OUTPUT = [
   s("id", "Attendee ID"),
   s("orderId", "Order ID"),
@@ -578,115 +504,182 @@ var ATTENDEE_SAMPLE = {
   created: "2026-11-01T20:34:09.000Z",
   changed: "2026-11-01T20:34:09.000Z"
 };
-var ATTENDEE_CHANGED_OUTPUT = [
-  ...notificationOutput,
-  o("attendee", "Attendee (null once deleted)"),
-  ...prefixOutput("attendee", ATTENDEE_OUTPUT)
-];
-var ATTENDEE_CHANGED_SAMPLE = {
-  ...notificationSample("attendee", "created", `/events/${ID.event}/attendees/${ID.attendee}`, []),
-  attendee: ATTENDEE_SAMPLE
-};
+function payloadOutput(dataLabel, dataFields, extraMeta = []) {
+  return [
+    s("urn", "URN of the object that changed"),
+    s("action", "Action (e.g. order.placed, event.updated)"),
+    s("type", "Type (event, offering, order, attendee)"),
+    s("id", "Object ID"),
+    s("timestamp", "When it happened (UTC)"),
+    o("data", `${dataLabel} (null once deleted)`),
+    ...prefixOutput("data", dataFields),
+    o("meta", "Meta"),
+    a("meta.changedFields", "Changed fields (e.g. costs, costs.tax)"),
+    s("meta.companyId", "Company ID"),
+    s("meta.eventId", "Event ID (null when none)"),
+    s("meta.resourcePath", "Resource path"),
+    s("meta.deliveryId", "Delivery ID"),
+    ...extraMeta
+  ];
+}
+function payloadSample(action, resourcePath, data, changedFields, extraMeta = {}) {
+  const segments = resourcePath.split("/").filter(Boolean);
+  return {
+    urn: `urn:1:${ID.company}:cohost-falcon:${resourcePath}`,
+    action,
+    type: action.slice(0, action.indexOf(".")),
+    id: segments[segments.length - 1],
+    timestamp: "2026-11-01T20:34:10.000Z",
+    data,
+    meta: {
+      changedFields,
+      companyId: ID.company,
+      eventId: ID.event,
+      resourcePath,
+      deliveryId: "trg_sample",
+      ...extraMeta
+    }
+  };
+}
+var ORDER_TRIGGER_OUTPUT = payloadOutput("Order", ORDER_OUTPUT, [
+  a("meta.transactions", "Payment transactions", TRANSACTION_FIELDS)
+]);
+function orderTriggerSample(action, changedFields = []) {
+  return payloadSample(action, `/orders/${ID.order}`, ORDER_SAMPLE, changedFields, {
+    transactions: ORDER_DETAILS_SAMPLE.transactions
+  });
+}
+var EVENT_CHANGED_OUTPUT = payloadOutput("Event", EVENT_OUTPUT);
+var EVENT_CHANGED_SAMPLE = payloadSample("event.updated", `/events/${ID.event}`, EVENT_SAMPLE, [
+  "name",
+  "start"
+]);
+var TICKET_CHANGED_OUTPUT = payloadOutput("Ticket", TICKET_OUTPUT);
+var TICKET_CHANGED_SAMPLE = payloadSample(
+  "offering.updated",
+  `/events/${ID.event}/tickets/${ID.ticket}`,
+  TICKET_SAMPLE,
+  ["costs", "costs.tax", "costs.total", "changed"]
+);
+var ATTENDEE_CHANGED_OUTPUT = payloadOutput("Attendee", ATTENDEE_OUTPUT);
+var ATTENDEE_CHANGED_SAMPLE = payloadSample(
+  "attendee.created",
+  `/events/${ID.event}/attendees/${ID.attendee}`,
+  ATTENDEE_SAMPLE,
+  []
+);
+var OBJECT_CHANGED_OUTPUT = payloadOutput(
+  "The object (fields depend on type; same as its get-* action)",
+  [s("id", "Object ID")]
+);
+var OBJECT_CHANGED_SAMPLE = payloadSample(
+  "offering.updated",
+  `/events/${ID.event}/tickets/${ID.ticket}`,
+  { id: ID.ticket },
+  ["capacity"]
+);
+
+// lib/payload.ts
+async function fetchObject(client, type, id, eventId) {
+  const enc = encodeURIComponent;
+  switch (type) {
+    case "event":
+      return { data: await client.request(`/events/${enc(id)}`) };
+    case "offering":
+      return { data: eventId ? await client.request(`/events/${enc(eventId)}/tickets/${enc(id)}`) : null };
+    case "attendee":
+      return { data: eventId ? await client.request(`/events/${enc(eventId)}/attendees/${enc(id)}`) : null };
+    case "order": {
+      const details = await client.request(`/orders/${enc(id)}`);
+      const order = details && typeof details === "object" && "order" in details ? details.order : details;
+      return { data: order ?? null, transactions: details?.transactions ?? [] };
+    }
+    default:
+      return { data: null };
+  }
+}
+async function toPayload(raw, ctx) {
+  const ping = pingOf(raw);
+  const dot = ping.action.indexOf(".");
+  const type = dot > 0 ? ping.action.slice(0, dot) : ping.action;
+  const what = dot > 0 ? ping.action.slice(dot + 1) : "";
+  const segments = ping.context.resourcePath.split("/").filter(Boolean);
+  const id = segments[segments.length - 1];
+  let eventId = segments[0] === "events" && segments[1] ? segments[1] : null;
+  const { data, transactions } = what === "deleted" ? { data: null, transactions: type === "order" ? [] : void 0 } : await fetchObject(new CohostClient(ctx), type, id, eventId);
+  const contextId = type === "order" ? data?.contextId : void 0;
+  if (!eventId && typeof contextId === "string" && contextId.startsWith("evt_")) eventId = contextId.slice(4);
+  return {
+    urn: ping.urn,
+    action: ping.action,
+    type,
+    id,
+    timestamp: ping.timestamp,
+    data,
+    meta: {
+      changedFields: ping.data?.changedFields ?? [],
+      companyId: ping.context.companyId,
+      eventId,
+      resourcePath: ping.context.resourcePath,
+      deliveryId: ping.id,
+      ...transactions ? { transactions } : {}
+    }
+  };
+}
 
 // triggers/order-placed.ts
-function orderIdFromPath(resourcePath) {
-  const parts = resourcePath.split("/").filter(Boolean);
-  return parts[parts.length - 1];
-}
 var orderPlaced = {
   key: "order-placed",
   title: "Order Placed",
   description: "Fires when a Cohost order is placed.",
-  output: ORDER_DETAILS_OUTPUT,
-  sample: ORDER_DETAILS_SAMPLE,
-  async onSubscribe({ callbackUrl }, ctx) {
-    const client = new CohostClient(ctx);
-    const webhook = await client.request("/webhooks", {
-      method: "POST",
-      body: { name: "w6w: order placed", url: callbackUrl, events: ["order.placed"] }
-    });
-    return { webhookId: webhook.id };
+  output: ORDER_TRIGGER_OUTPUT,
+  sample: orderTriggerSample("order.placed"),
+  onSubscribe({ callbackUrl }, ctx) {
+    return subscribeWebhook(ctx, "w6w: order placed", callbackUrl, ["order.placed"]);
   },
-  async onUnsubscribe({ state }, ctx) {
-    const client = new CohostClient(ctx);
-    await client.request(`/webhooks/${encodeURIComponent(state.webhookId)}`, { method: "DELETE" });
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
   },
   async handleIngest({ raw }, ctx) {
-    const ping = pingOf(raw);
-    const orderId = orderIdFromPath(ping.context.resourcePath);
-    const client = new CohostClient(ctx);
-    const order = await client.request(`/orders/${encodeURIComponent(orderId)}`);
-    return [order];
+    return [await toPayload(raw, ctx)];
   }
 };
 var order_placed_default = orderPlaced;
 
 // triggers/order-changed.ts
-function orderIdFromPath2(resourcePath) {
-  const parts = resourcePath.split("/").filter(Boolean);
-  return parts[parts.length - 1];
-}
 var orderChanged = {
   key: "order-changed",
   title: "Order Changed",
   description: "Fires when a Cohost order is changed.",
-  output: ORDER_DETAILS_OUTPUT,
-  sample: ORDER_DETAILS_SAMPLE,
-  async onSubscribe({ callbackUrl }, ctx) {
-    const client = new CohostClient(ctx);
-    const webhook = await client.request("/webhooks", {
-      method: "POST",
-      body: { name: "w6w: order changed", url: callbackUrl, events: ["order.changed"] }
-    });
-    return { webhookId: webhook.id };
+  output: ORDER_TRIGGER_OUTPUT,
+  sample: orderTriggerSample("order.changed", ["status"]),
+  onSubscribe({ callbackUrl }, ctx) {
+    return subscribeWebhook(ctx, "w6w: order changed", callbackUrl, ["order.changed"]);
   },
-  async onUnsubscribe({ state }, ctx) {
-    const client = new CohostClient(ctx);
-    await client.request(`/webhooks/${encodeURIComponent(state.webhookId)}`, { method: "DELETE" });
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
   },
   async handleIngest({ raw }, ctx) {
-    const ping = pingOf(raw);
-    const orderId = orderIdFromPath2(ping.context.resourcePath);
-    const client = new CohostClient(ctx);
-    const order = await client.request(`/orders/${encodeURIComponent(orderId)}`);
-    return [order];
+    return [await toPayload(raw, ctx)];
   }
 };
 var order_changed_default = orderChanged;
 
 // triggers/order-confirmation-requested.ts
-function orderIdFromPath3(resourcePath) {
-  const parts = resourcePath.split("/").filter(Boolean);
-  return parts[parts.length - 1];
-}
 var orderConfirmationRequested = {
   key: "order-confirmation-requested",
   title: "Order Confirmation Requested",
   description: "Fires when Cohost determines an order confirmation email is due.",
-  output: ORDER_DETAILS_OUTPUT,
-  sample: ORDER_DETAILS_SAMPLE,
-  async onSubscribe({ callbackUrl }, ctx) {
-    const client = new CohostClient(ctx);
-    const webhook = await client.request("/webhooks", {
-      method: "POST",
-      body: {
-        name: "w6w: order confirmation requested",
-        url: callbackUrl,
-        events: ["order.confirmation-requested"]
-      }
-    });
-    return { webhookId: webhook.id };
+  output: ORDER_TRIGGER_OUTPUT,
+  sample: orderTriggerSample("order.confirmation-requested"),
+  onSubscribe({ callbackUrl }, ctx) {
+    return subscribeWebhook(ctx, "w6w: order confirmation requested", callbackUrl, ["order.confirmation-requested"]);
   },
-  async onUnsubscribe({ state }, ctx) {
-    const client = new CohostClient(ctx);
-    await client.request(`/webhooks/${encodeURIComponent(state.webhookId)}`, { method: "DELETE" });
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
   },
   async handleIngest({ raw }, ctx) {
-    const ping = pingOf(raw);
-    const orderId = orderIdFromPath3(ping.context.resourcePath);
-    const client = new CohostClient(ctx);
-    const order = await client.request(`/orders/${encodeURIComponent(orderId)}`);
-    return [order];
+    return [await toPayload(raw, ctx)];
   }
 };
 var order_confirmation_requested_default = orderConfirmationRequested;
@@ -723,9 +716,7 @@ var eventChanged = {
     return unsubscribeWebhook(ctx, state);
   },
   async handleIngest({ raw }, ctx) {
-    const change = toNotification(raw);
-    const event = change.action === "deleted" ? null : await new CohostClient(ctx).request(`/events/${encodeURIComponent(change.id)}`);
-    return [{ ...change, event }];
+    return [await toPayload(raw, ctx)];
   }
 };
 var event_changed_default = eventChanged;
@@ -760,11 +751,7 @@ var ticketChanged = {
     return unsubscribeWebhook(ctx, state);
   },
   async handleIngest({ raw }, ctx) {
-    const change = toNotification(raw);
-    const ticket = change.action === "deleted" || !change.eventId ? null : await new CohostClient(ctx).request(
-      `/events/${encodeURIComponent(change.eventId)}/tickets/${encodeURIComponent(change.id)}`
-    );
-    return [{ ...change, ticket }];
+    return [await toPayload(raw, ctx)];
   }
 };
 var ticket_changed_default = ticketChanged;
@@ -800,11 +787,7 @@ var attendeeChanged = {
     return unsubscribeWebhook(ctx, state);
   },
   async handleIngest({ raw }, ctx) {
-    const change = toNotification(raw);
-    const attendee = change.action === "deleted" || !change.eventId ? null : await new CohostClient(ctx).request(
-      `/events/${encodeURIComponent(change.eventId)}/attendees/${encodeURIComponent(change.id)}`
-    );
-    return [{ ...change, attendee }];
+    return [await toPayload(raw, ctx)];
   }
 };
 var attendee_changed_default = attendeeChanged;
@@ -831,7 +814,7 @@ function webhookEvents(params) {
 var objectChanged = {
   key: "object-changed",
   title: "Object Changed",
-  description: "Fires when a Cohost event, ticket, order or attendee changes. Sends its URN, action and type.",
+  description: "Fires when a Cohost event, ticket, order or attendee changes.",
   params: [
     {
       key: "types",
@@ -871,8 +854,8 @@ var objectChanged = {
   onUnsubscribe({ state }, ctx) {
     return unsubscribeWebhook(ctx, state);
   },
-  handleIngest({ raw }) {
-    return [toNotification(raw)];
+  async handleIngest({ raw }, ctx) {
+    return [await toPayload(raw, ctx)];
   }
 };
 var object_changed_default = objectChanged;
