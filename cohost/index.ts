@@ -91,12 +91,12 @@ import { withFriendlyOutput } from "./lib/friendly-output.ts";
  * same conversion to its result — `lib/friendly-output.ts`.
  *
  * Every trigger registers a real webhook subscription via
- * `onSubscribe`/`onUnsubscribe` (`POST`/`DELETE /v1/webhooks`). The order
- * triggers enrich the delivered notification into a full order via
- * `GET /orders/{id}` in `handleIngest` — see each trigger file's own header for
- * why (the webhook payload itself never carries the entity); the event/ticket
- * triggers send the change (URN, action, type) plus the fetched object, and
- * `object-changed` sends only the change.
+ * `onSubscribe`/`onUnsubscribe` (`POST`/`DELETE /v1/webhooks`) and hands the
+ * workflow the same payload (`lib/payload.ts`):
+ * `{ urn, action, type, id, timestamp, data, meta }` — `data` is the changed
+ * object, fetched in `handleIngest` (the webhook itself never carries it), and
+ * `meta` holds `changedFields`, `companyId`, `eventId`, `resourcePath`,
+ * `deliveryId` (+ `transactions` for orders).
  *
  * The two production Joonbug ("JB") workflows this app replaces map onto
  * this as:

@@ -1,9 +1,10 @@
 import type { OutputField } from "./w6w-triggers.ts";
-import { notificationOutput } from "./notification.ts";
 
 /**
  * What the triggers hand a workflow — declared `output` + a matching `sample`, so the editor
- * can offer a trigger's fields before the trigger has ever fired.
+ * can offer a trigger's fields before the trigger has ever fired. Every trigger hands the same
+ * envelope (`TriggerPayload`, `payload.ts`): `{ urn, action, type, id, timestamp, data, meta }`;
+ * only what `data` holds differs (the order, event, ticket or attendee).
  *
  * Shapes follow what the Cohost API returns through `lib/client.ts` (envelope unwrapped):
  *   - `GET /orders/{id}` → `OrderDetails` `{ order, organizer, transaction, transactions }`
@@ -373,58 +374,6 @@ export const ORDER_DETAILS_SAMPLE = {
   ],
 };
 
-// ---- change notifications -------------------------------------------------------------------
-
-/** A change notification (see `notification.ts`) for `<type>.<action>` on `resourcePath`. */
-function notificationSample(type: string, action: string, resourcePath: string, changedFields: string[]) {
-  const segments = resourcePath.split("/").filter(Boolean);
-  return {
-    urn: `urn:1:${ID.company}:cohost-falcon:${resourcePath}`,
-    type,
-    action,
-    webhookEvent: `${type}.${action}`,
-    id: segments[segments.length - 1],
-    ...(segments[0] === "events" && segments[1] ? { eventId: segments[1] } : {}),
-    resourcePath,
-    companyId: ID.company,
-    changedFields,
-    timestamp: "2026-11-01T20:34:10.000Z",
-  };
-}
-
-export const OBJECT_CHANGED_OUTPUT: OutputField[] = notificationOutput;
-export const OBJECT_CHANGED_SAMPLE = notificationSample(
-  "offering",
-  "updated",
-  `/events/${ID.event}/tickets/${ID.ticket}`,
-  ["capacity"],
-);
-
-export const EVENT_CHANGED_OUTPUT: OutputField[] = [
-  ...notificationOutput,
-  o("event", "Event (null once deleted)"),
-  ...prefixOutput("event", EVENT_OUTPUT),
-];
-export const EVENT_CHANGED_SAMPLE = {
-  ...notificationSample("event", "updated", `/events/${ID.event}`, ["name", "start"]),
-  event: EVENT_SAMPLE,
-};
-
-export const TICKET_CHANGED_OUTPUT: OutputField[] = [
-  ...notificationOutput,
-  o("ticket", "Ticket (null once deleted)"),
-  ...prefixOutput("ticket", TICKET_OUTPUT),
-];
-export const TICKET_CHANGED_SAMPLE = {
-  ...notificationSample("offering", "updated", `/events/${ID.event}/tickets/${ID.ticket}`, [
-    "costs",
-    "costs.tax",
-    "costs.total",
-    "changed",
-  ]),
-  ticket: TICKET_SAMPLE,
-};
-
 // ---- attendee -------------------------------------------------------------------------------
 
 /**
@@ -487,12 +436,98 @@ export const ATTENDEE_SAMPLE = {
   changed: "2026-11-01T20:34:09.000Z",
 };
 
-export const ATTENDEE_CHANGED_OUTPUT: OutputField[] = [
-  ...notificationOutput,
-  o("attendee", "Attendee (null once deleted)"),
-  ...prefixOutput("attendee", ATTENDEE_OUTPUT),
-];
-export const ATTENDEE_CHANGED_SAMPLE = {
-  ...notificationSample("attendee", "created", `/events/${ID.event}/attendees/${ID.attendee}`, []),
-  attendee: ATTENDEE_SAMPLE,
-};
+// ---- trigger payloads -----------------------------------------------------------------------
+
+/** The envelope every trigger shares; `data` is declared per trigger. */
+function payloadOutput(dataLabel: string, dataFields: readonly OutputField[], extraMeta: OutputField[] = []): OutputField[] {
+  return [
+    s("urn", "URN of the object that changed"),
+    s("action", "Action (e.g. order.placed, event.updated)"),
+    s("type", "Type (event, offering, order, attendee)"),
+    s("id", "Object ID"),
+    s("timestamp", "When it happened (UTC)"),
+    o("data", `${dataLabel} (null once deleted)`),
+    ...prefixOutput("data", dataFields),
+    o("meta", "Meta"),
+    a("meta.changedFields", "Changed fields (e.g. costs, costs.tax)"),
+    s("meta.companyId", "Company ID"),
+    s("meta.eventId", "Event ID (null when none)"),
+    s("meta.resourcePath", "Resource path"),
+    s("meta.deliveryId", "Delivery ID"),
+    ...extraMeta,
+  ];
+}
+
+/** A sample payload for `<type>.<what>` on `resourcePath`, carrying `data`. */
+function payloadSample(
+  action: string,
+  resourcePath: string,
+  data: unknown,
+  changedFields: string[],
+  extraMeta: Record<string, unknown> = {},
+) {
+  const segments = resourcePath.split("/").filter(Boolean);
+  return {
+    urn: `urn:1:${ID.company}:cohost-falcon:${resourcePath}`,
+    action,
+    type: action.slice(0, action.indexOf(".")),
+    id: segments[segments.length - 1],
+    timestamp: "2026-11-01T20:34:10.000Z",
+    data,
+    meta: {
+      changedFields,
+      companyId: ID.company,
+      eventId: ID.event,
+      resourcePath,
+      deliveryId: "trg_sample",
+      ...extraMeta,
+    },
+  };
+}
+
+/** The order triggers: `data` is the order, `meta.transactions` its payments. */
+export const ORDER_TRIGGER_OUTPUT: OutputField[] = payloadOutput("Order", ORDER_OUTPUT, [
+  a("meta.transactions", "Payment transactions", TRANSACTION_FIELDS),
+]);
+export function orderTriggerSample(action: string, changedFields: string[] = []) {
+  return payloadSample(action, `/orders/${ID.order}`, ORDER_SAMPLE, changedFields, {
+    transactions: ORDER_DETAILS_SAMPLE.transactions,
+  });
+}
+
+export const EVENT_CHANGED_OUTPUT: OutputField[] = payloadOutput("Event", EVENT_OUTPUT);
+export const EVENT_CHANGED_SAMPLE = payloadSample("event.updated", `/events/${ID.event}`, EVENT_SAMPLE, [
+  "name",
+  "start",
+]);
+
+export const TICKET_CHANGED_OUTPUT: OutputField[] = payloadOutput("Ticket", TICKET_OUTPUT);
+export const TICKET_CHANGED_SAMPLE = payloadSample(
+  "offering.updated",
+  `/events/${ID.event}/tickets/${ID.ticket}`,
+  TICKET_SAMPLE,
+  ["costs", "costs.tax", "costs.total", "changed"],
+);
+
+export const ATTENDEE_CHANGED_OUTPUT: OutputField[] = payloadOutput("Attendee", ATTENDEE_OUTPUT);
+export const ATTENDEE_CHANGED_SAMPLE = payloadSample(
+  "attendee.created",
+  `/events/${ID.event}/attendees/${ID.attendee}`,
+  ATTENDEE_SAMPLE,
+  [],
+);
+
+/**
+ * Object Changed fires for any type, so its `data` is whichever object changed — only `id` is
+ * common to all; the rest matches the type's `get-*` action.
+ */
+export const OBJECT_CHANGED_OUTPUT: OutputField[] = payloadOutput(
+  "The object (fields depend on type; same as its get-* action)",
+  [s("id", "Object ID")],
+);
+export const OBJECT_CHANGED_SAMPLE = payloadSample(
+  "offering.updated",
+  `/events/${ID.event}/tickets/${ID.ticket}`,
+  { id: ID.ticket },
+  ["capacity"],
+);

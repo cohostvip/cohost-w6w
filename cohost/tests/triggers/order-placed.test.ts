@@ -30,14 +30,32 @@ test("order-placed: onUnsubscribe DELETEs /webhooks/{id} from state", async () =
   expect(new URL(calls[0].url).pathname).toBe("/v1/webhooks/wh_1");
 });
 
-test("order-placed: handleIngest fetches the full order from the ping's resourcePath", async () => {
-  const order = { id: "ord_abc", status: "placed", orderNumber: "CH-100245" };
-  const { ctx, calls } = mockCtx([{ body: order }]);
+test("order-placed: handleIngest sends the unified payload — the fetched order in data, its payments in meta", async () => {
+  const order = { id: "ord_abc", status: "placed", orderNumber: "CH-100245", contextId: "evt_ev_1" };
+  const transactions = [{ provider: "authnet", status: "approved" }];
+  const { ctx, calls } = mockCtx([{ body: { order, organizer: null, transaction: null, transactions } }]);
   const events = await orderPlaced.handleIngest(
     { raw: { body: PING }, params: {}, state: { webhookId: "wh_1" }, subscriptionId: "sub_1" },
     ctx,
   );
   expect(calls[0].method).toBe("GET");
   expect(new URL(calls[0].url).pathname).toBe("/v1/orders/ord_abc");
-  expect(events).toEqual([order]);
+  expect(events).toEqual([
+    {
+      urn: PING.urn,
+      action: PING.action,
+      type: "order",
+      id: "ord_abc",
+      timestamp: PING.timestamp,
+      data: order,
+      meta: {
+        changedFields: [],
+        companyId: "co_1",
+        eventId: "ev_1",
+        resourcePath: "/orders/ord_abc",
+        deliveryId: "trg_1",
+        transactions,
+      },
+    },
+  ]);
 });

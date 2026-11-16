@@ -1,13 +1,11 @@
-import { CohostClient } from "../lib/client.ts";
 import {
-  type ChangeNotification,
   pickValues,
   type SubscriptionState,
   subscribeWebhook,
-  toNotification,
   unsubscribeWebhook,
 } from "../lib/notification.ts";
 import { EVENT_CHANGED_OUTPUT, EVENT_CHANGED_SAMPLE } from "../lib/outputs.ts";
+import { type TriggerPayload, toPayload } from "../lib/payload.ts";
 import type { TriggerDefinition } from "../lib/w6w-triggers.ts";
 
 const ACTIONS = ["created", "updated", "deleted", "published"] as const;
@@ -24,11 +22,10 @@ interface Params {
  * Cohost fires `event.changed` alongside every `event.updated`, so only
  * `updated` is offered — subscribing to both would deliver each update twice.
  *
- * `handleIngest` hands the workflow the change notification plus the current
- * event (`GET /events/{id}`); a deleted event has nothing left to fetch, so
- * `event` is `null` then.
+ * Sends the unified trigger payload (`lib/payload.ts`): `data` is the current
+ * event (`GET /events/{id}`), `null` once deleted.
  */
-const eventChanged: TriggerDefinition<Params, ChangeNotification & { event: unknown }, SubscriptionState> = {
+const eventChanged: TriggerDefinition<Params, TriggerPayload, SubscriptionState> = {
   key: "event-changed",
   title: "Event Changed",
   description: "Fires when a Cohost event is created, updated, deleted or published.",
@@ -60,11 +57,7 @@ const eventChanged: TriggerDefinition<Params, ChangeNotification & { event: unkn
   },
 
   async handleIngest({ raw }, ctx) {
-    const change = toNotification(raw);
-    const event = change.action === "deleted"
-      ? null
-      : await new CohostClient(ctx).request(`/events/${encodeURIComponent(change.id)}`);
-    return [{ ...change, event }];
+    return [await toPayload(raw, ctx)];
   },
 };
 

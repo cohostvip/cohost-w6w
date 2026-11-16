@@ -1,12 +1,11 @@
 import {
-  type ChangeNotification,
   pickValues,
   type SubscriptionState,
   subscribeWebhook,
-  toNotification,
   unsubscribeWebhook,
 } from "../lib/notification.ts";
 import { OBJECT_CHANGED_OUTPUT, OBJECT_CHANGED_SAMPLE } from "../lib/outputs.ts";
+import { type TriggerPayload, toPayload } from "../lib/payload.ts";
 import type { TriggerDefinition } from "../lib/w6w-triggers.ts";
 
 /**
@@ -41,18 +40,17 @@ export function webhookEvents(params: Params): string[] {
 
 /**
  * Object Changed — the general trigger: fires when any picked Cohost object
- * type changes, and hands the workflow only what changed — its URN, the
- * action (`created`, `updated`, `deleted`, …) and its type (`event`,
- * `offering`, `order`, `attendee`). It does not fetch the object; follow it
- * with the matching `get-*` action when the workflow needs the data.
+ * type changes. Sends the same payload as every other trigger (`lib/payload.ts`):
+ * `action` (`order.placed`, `offering.updated`, …) and `type` say what changed,
+ * `data` is the object itself (as its `get-*` action returns it; null once deleted).
  *
  * Cohost webhooks take no wildcard, so `onSubscribe` registers one webhook for
  * the explicit list of events the picked types × actions map to.
  */
-const objectChanged: TriggerDefinition<Params, ChangeNotification, SubscriptionState> = {
+const objectChanged: TriggerDefinition<Params, TriggerPayload, SubscriptionState> = {
   key: "object-changed",
   title: "Object Changed",
-  description: "Fires when a Cohost event, ticket, order or attendee changes. Sends its URN, action and type.",
+  description: "Fires when a Cohost event, ticket, order or attendee changes.",
   params: [
     {
       key: "types",
@@ -95,8 +93,8 @@ const objectChanged: TriggerDefinition<Params, ChangeNotification, SubscriptionS
     return unsubscribeWebhook(ctx, state);
   },
 
-  handleIngest({ raw }) {
-    return [toNotification(raw)];
+  async handleIngest({ raw }, ctx) {
+    return [await toPayload(raw, ctx)];
   },
 };
 
