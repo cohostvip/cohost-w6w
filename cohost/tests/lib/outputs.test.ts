@@ -68,3 +68,17 @@ test("every trigger sample matches its declared output, both ways", () => {
     });
   }
 });
+
+test("every trigger declares the same envelope: urn, action, type, id, timestamp, data, meta", () => {
+  const envelope = (t: (typeof app.triggers)[number]) =>
+    (t.output as OutputField[])
+      .map((f) => f.key)
+      .filter((k) => !k.startsWith("data.") && k !== "meta.transactions")
+      .sort();
+  const [first, ...rest] = app.triggers;
+  expect(envelope(first)).toEqual(
+    ["action", "data", "id", "meta", "meta.changedFields", "meta.companyId", "meta.deliveryId", "meta.eventId",
+      "meta.resourcePath", "timestamp", "type", "urn"],
+  );
+  for (const t of rest) expect(envelope(t), t.key).toEqual(envelope(first));
+});

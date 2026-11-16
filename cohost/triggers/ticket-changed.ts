@@ -1,13 +1,11 @@
-import { CohostClient } from "../lib/client.ts";
 import {
-  type ChangeNotification,
   pickValues,
   type SubscriptionState,
   subscribeWebhook,
-  toNotification,
   unsubscribeWebhook,
 } from "../lib/notification.ts";
 import { TICKET_CHANGED_OUTPUT, TICKET_CHANGED_SAMPLE } from "../lib/outputs.ts";
+import { type TriggerPayload, toPayload } from "../lib/payload.ts";
 import type { TriggerDefinition } from "../lib/w6w-triggers.ts";
 
 const ACTIONS = ["created", "updated", "deleted"] as const;
@@ -22,11 +20,10 @@ interface Params {
  * `offering.*` webhook events (`offering.changed` duplicates every
  * `offering.updated`, so it is not offered).
  *
- * `handleIngest` hands the workflow the change notification plus the current
- * ticket (`GET /events/{eventId}/tickets/{id}`); `ticket` is `null` for a
- * deleted one.
+ * Sends the unified trigger payload (`lib/payload.ts`): `data` is the current
+ * ticket (`GET /events/{eventId}/tickets/{id}`), `null` once deleted.
  */
-const ticketChanged: TriggerDefinition<Params, ChangeNotification & { ticket: unknown }, SubscriptionState> = {
+const ticketChanged: TriggerDefinition<Params, TriggerPayload, SubscriptionState> = {
   key: "ticket-changed",
   title: "Ticket Changed",
   description: "Fires when a ticket on a Cohost event is created, updated or deleted.",
@@ -57,13 +54,7 @@ const ticketChanged: TriggerDefinition<Params, ChangeNotification & { ticket: un
   },
 
   async handleIngest({ raw }, ctx) {
-    const change = toNotification(raw);
-    const ticket = change.action === "deleted" || !change.eventId
-      ? null
-      : await new CohostClient(ctx).request(
-        `/events/${encodeURIComponent(change.eventId)}/tickets/${encodeURIComponent(change.id)}`,
-      );
-    return [{ ...change, ticket }];
+    return [await toPayload(raw, ctx)];
   },
 };
 

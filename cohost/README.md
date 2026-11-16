@@ -42,7 +42,8 @@ cohost/
     ├── params.ts            # shared param / output fragments (pagination, resources)
     ├── outputs.ts           # trigger payload shapes: declared output + sample
     ├── types.ts             # minimal structural types for the resources
-    ├── notification.ts      # webhook ping → {urn, type, action, …}; shared subscribe/unsubscribe
+    ├── notification.ts      # the webhook ping; shared subscribe/unsubscribe
+    ├── payload.ts           # ping → the one trigger payload {urn, action, type, id, timestamp, data, meta}
     ├── friendly.ts          # amounts + UTC timestamps → display-ready fields
     ├── friendly-output.ts   # the `friendly` flag on every fetch action
     └── w6w-triggers.ts      # forward-compat shim: trigger types not yet in @w6w/types
@@ -56,39 +57,62 @@ cohost/
   narrower signal Cohost's own messaging layer emits when a confirmation email is
   actually due (not every placed order needs one).
 - **Event Changed** — fires on `event.created` / `updated` / `deleted` / `published`
-  (pick which; created, updated and deleted by default). Sends the change plus the
-  current event (`null` once deleted).
+  (pick which; created, updated and deleted by default).
 - **Ticket Changed** — fires on `offering.created` / `updated` / `deleted` (tickets
-  are offerings on the platform). Sends the change plus the current ticket (`null`
-  once deleted).
+  are offerings on the platform).
 - **Attendee Changed** — fires on `attendee.created` / `checked_in` / `deleted`
   (created only by default). A placed order creates one attendee per admission, so a
-  3-ticket order runs the workflow three times — once per guest. Sends the change plus
-  the current attendee (`null` once deleted); its `orderId` leads to `get-order`.
+  3-ticket order runs the workflow three times — once per guest. `data.orderId` leads
+  to `get-order`.
 - **Object Changed** — the general trigger. Pick the types (event, ticket/offering,
   order, attendee) and actions (created, updated, deleted by default; also published,
   placed, refunded, checked in); it subscribes to every combination Cohost emits.
-  Sends only the change — fetch the object with the matching `get-*` action.
 
-The three change triggers send `{ urn, type, action, webhookEvent, id, eventId?,
-resourcePath, companyId, changedFields, timestamp }`, e.g. `type: "offering"`,
-`action: "updated"`. `changedFields` lists each changed top-level key plus every changed
-dotted path under it — a tax change gives `["costs", "costs.tax", "costs.total"]`; arrays
-are listed whole. It names fields only: the old values are not sent. `*.changed` events are never subscribed: Cohost fires one with
+`*.changed` events are never subscribed by the change triggers: Cohost fires one with
 every `*.updated`, so they would deliver each update twice.
 
+### One payload for every trigger
+
+Every trigger hands the workflow the same shape (`lib/payload.ts`), so a field is in the
+same place whichever trigger started the run:
+
+```jsonc
+{
+  "urn": "urn:1:co_1:cohost-falcon:/orders/ord_1", // the object that changed
+  "action": "order.placed",                         // <type>.<what happened>: event.updated, offering.deleted, …
+  "type": "order",                                  // event | offering | order | attendee
+  "id": "ord_1",                                    // the object's own id
+  "timestamp": "2026-11-01T20:34:10.000Z",
+  "data": { "...": "the object" },                  // null once deleted
+  "meta": {
+    "changedFields": ["costs", "costs.total"],      // [] when not an update
+    "companyId": "co_1",
+    "eventId": "ev_1",                              // its event; null when it has none
+    "resourcePath": "/orders/ord_1",
+    "deliveryId": "trg_1",                          // Cohost's id for this delivery (dedupe key)
+    "transactions": []                              // orders only: payment transactions
+  }
+}
+```
+
+- `data` is the object as its `get-*` action returns it — the order (`get-order`'s
+  `order`: read `data.customer.email`, `data.costs.total`, `data.items`), the event,
+  the ticket or the attendee. Cohost's webhook is only a notification
+  (`{id, action, urn, context, data?: {changedFields}}`), never the object, so
+  `handleIngest` fetches it. A deleted object has nothing to fetch: `data` is `null`.
+- `meta.changedFields` lists each changed top-level key plus every changed dotted path
+  under it — a tax change gives `["costs", "costs.tax", "costs.total"]`; arrays are
+  listed whole. It names fields only: the old values are not sent.
+- An order's `meta.eventId` comes from its `contextId` (`evt_<id>`); events, tickets
+  and attendees take it from their path.
+
 Each trigger's `onSubscribe`/`onUnsubscribe` register/deregister a real Cohost
-webhook (`POST`/`DELETE /v1/webhooks`) against the `callbackUrl` the runtime hands
-it. `handleIngest` does **not** pass the delivered webhook ping straight through —
-Cohost's webhook payload is a notification (`{id, action, urn, context,
-changedFields?}`), never the entity itself — so the order triggers fetch the full
-order via `GET /orders/{id}` before handing it to the workflow. The order triggers
-therefore send that endpoint's `{ order, organizer, transaction, transactions }` — read
-fields as `order.customer.email`, `order.costs.total`, `order.items`.
+webhook (`POST`/`DELETE /v1/webhooks`) against the `callbackUrl` the runtime hands it.
 
 Every trigger declares its payload as `output` plus a synthetic `sample`
 (`lib/outputs.ts`), so the editor offers its fields before the trigger first fires.
-`tests/lib/outputs.test.ts` keeps each sample in step with its `output`.
+`tests/lib/outputs.test.ts` keeps each sample in step with its `output`, and every
+trigger's declared envelope identical.
 
 ## Actions
 

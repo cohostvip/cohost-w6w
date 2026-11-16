@@ -1,68 +1,38 @@
-import { CohostClient } from "../lib/client.ts";
-import { pingOf } from "../lib/notification.ts";
-import { ORDER_DETAILS_OUTPUT, ORDER_DETAILS_SAMPLE } from "../lib/outputs.ts";
+import { type SubscriptionState, subscribeWebhook, unsubscribeWebhook } from "../lib/notification.ts";
+import { ORDER_TRIGGER_OUTPUT, orderTriggerSample } from "../lib/outputs.ts";
+import { type TriggerPayload, toPayload } from "../lib/payload.ts";
 import type { TriggerDefinition } from "../lib/w6w-triggers.ts";
 
-/** Opaque state returned by `onSubscribe`, handed back verbatim to `onUnsubscribe`. */
-interface SubscriptionState {
-  webhookId: string;
-}
-
-/** `/orders/<id>` → `<id>`. `resourcePath` is the one field guaranteed to name
- * the changed document (the `urn` embeds the same id, just harder to parse). */
-function orderIdFromPath(resourcePath: string): string {
-  const parts = resourcePath.split("/").filter(Boolean);
-  return parts[parts.length - 1];
-}
-
 /**
- * Order Placed — fires when a Cohost order is placed (checkout completed),
- * i.e. the platform's `order.placed` event.
+ * Order Placed — fires when a Cohost order is placed (checkout completed), i.e. the
+ * platform's `order.placed` event.
  *
- * Entry point for the "send confirmation email" workflow: subscribe to this
- * trigger, then use `get-order` to fetch the order and send.
+ * `onSubscribe`/`onUnsubscribe` register/deregister a real webhook (`POST`/`DELETE /v1/webhooks`)
+ * against `callbackUrl` — see `.claude/docs/reference/webhooks.md` in the cohost monorepo for the
+ * delivery pipeline this lands on (`triggeredEvents` → `deliverWebhooks`, HMAC-signed via
+ * `X-Cohost-Signature`).
  *
- * `onSubscribe`/`onUnsubscribe` register/deregister a real webhook
- * (`POST`/`DELETE /v1/webhooks`) against `callbackUrl` — see
- * `.claude/docs/reference/webhooks.md` in the cohost monorepo for the
- * delivery pipeline this lands on (`triggeredEvents` →
- * `deliverWebhooks`, HMAC-signed via `X-Cohost-Signature`).
- *
- * `handleIngest` does NOT pass the raw webhook body through: `deliverWebhooks`
- * sends a PING (`{id, action, urn, context, data?: {changedFields}}`), never
- * the order itself (`WebhookPayload.data` only ever carries `changedFields` —
- * see `packages/domains/bll/webhooks/src/service.ts#resolveForEvent`). This
- * fetches the real order via `GET /orders/{id}` (the same call `get-order`
- * makes) so the trigger's declared `output` is actually populated, not a
- * best-effort guess from a notification payload.
+ * Sends the unified trigger payload (`lib/payload.ts`): `data` is the order (fetched via
+ * `GET /orders/{id}` — the webhook is only a notification), `meta.transactions` its payments,
+ * `meta.changedFields` what changed.
  */
-const orderPlaced: TriggerDefinition<Record<string, never>, unknown, SubscriptionState> = {
+const orderPlaced: TriggerDefinition<Record<string, never>, TriggerPayload, SubscriptionState> = {
   key: "order-placed",
   title: "Order Placed",
   description: "Fires when a Cohost order is placed.",
-  output: ORDER_DETAILS_OUTPUT,
-  sample: ORDER_DETAILS_SAMPLE,
+  output: ORDER_TRIGGER_OUTPUT,
+  sample: orderTriggerSample("order.placed"),
 
-  async onSubscribe({ callbackUrl }, ctx) {
-    const client = new CohostClient(ctx);
-    const webhook = await client.request<{ id: string }>("/webhooks", {
-      method: "POST",
-      body: { name: "w6w: order placed", url: callbackUrl, events: ["order.placed"] },
-    });
-    return { webhookId: webhook.id };
+  onSubscribe({ callbackUrl }, ctx) {
+    return subscribeWebhook(ctx, "w6w: order placed", callbackUrl, ["order.placed"]);
   },
 
-  async onUnsubscribe({ state }, ctx) {
-    const client = new CohostClient(ctx);
-    await client.request(`/webhooks/${encodeURIComponent(state.webhookId)}`, { method: "DELETE" });
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
   },
 
   async handleIngest({ raw }, ctx) {
-    const ping = pingOf(raw);
-    const orderId = orderIdFromPath(ping.context.resourcePath);
-    const client = new CohostClient(ctx);
-    const order = await client.request(`/orders/${encodeURIComponent(orderId)}`);
-    return [order];
+    return [await toPayload(raw, ctx)];
   },
 };
 

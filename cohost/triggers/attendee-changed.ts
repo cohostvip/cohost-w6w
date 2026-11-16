@@ -1,13 +1,11 @@
-import { CohostClient } from "../lib/client.ts";
 import {
-  type ChangeNotification,
   pickValues,
   type SubscriptionState,
   subscribeWebhook,
-  toNotification,
   unsubscribeWebhook,
 } from "../lib/notification.ts";
 import { ATTENDEE_CHANGED_OUTPUT, ATTENDEE_CHANGED_SAMPLE } from "../lib/outputs.ts";
+import { type TriggerPayload, toPayload } from "../lib/payload.ts";
 import type { TriggerDefinition } from "../lib/w6w-triggers.ts";
 
 /** The `attendee.*` webhook events Cohost emits. Attendees have no `updated` event. */
@@ -26,11 +24,11 @@ interface Params {
  * work (a ticket email to each guest, a CRM contact per attendee, …). Attendees imported or
  * added by hand fire it too.
  *
- * `handleIngest` hands the workflow the change notification plus the current attendee
- * (`GET /events/{eventId}/attendees/{id}`); `attendee` is `null` for a deleted one. The
- * attendee's `orderId` leads to the order (`get-order`).
+ * Sends the unified trigger payload (`lib/payload.ts`): `data` is the current attendee
+ * (`GET /events/{eventId}/attendees/{id}`), `null` once deleted. `data.orderId` leads to the
+ * order (`get-order`).
  */
-const attendeeChanged: TriggerDefinition<Params, ChangeNotification & { attendee: unknown }, SubscriptionState> = {
+const attendeeChanged: TriggerDefinition<Params, TriggerPayload, SubscriptionState> = {
   key: "attendee-changed",
   title: "Attendee Changed",
   description:
@@ -62,13 +60,7 @@ const attendeeChanged: TriggerDefinition<Params, ChangeNotification & { attendee
   },
 
   async handleIngest({ raw }, ctx) {
-    const change = toNotification(raw);
-    const attendee = change.action === "deleted" || !change.eventId
-      ? null
-      : await new CohostClient(ctx).request(
-        `/events/${encodeURIComponent(change.eventId)}/attendees/${encodeURIComponent(change.id)}`,
-      );
-    return [{ ...change, attendee }];
+    return [await toPayload(raw, ctx)];
   },
 };
 
