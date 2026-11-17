@@ -1,4 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
+import { companyIdParam } from "../lib/params.ts";
 import { resourcePathFromUri } from "../lib/resource-uri.ts";
 import { generateUrn } from "../../../shared/urn.ts";
 
@@ -23,7 +24,7 @@ const resourceUriToUrnAction: ActionDefinition<Input, Output> = {
   requiresAuth: false,
   params: [
     { key: "resourceUri", label: "Resource URI", type: "string", required: true, hint: "e.g. https://www.eventbriteapi.com/v3/events/123/ticket_classes/456/" },
-    { key: "companyId", label: "Company ID", type: "string", required: true, hint: "The Cohost company the URN belongs to." },
+    companyIdParam("The Cohost company the URN belongs to. Defaults to this account."),
     { key: "connectionId", label: "Connection ID", type: "string", required: true, hint: "The Eventbrite connection, e.g. conn_…" },
   ],
 
