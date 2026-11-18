@@ -18,8 +18,15 @@ test("sync-object: posts the envelope to /rms/sync and returns the saved object"
   expect(action.idempotent).toBe(true);
 });
 
-test("asks only for type, data, mapped URN, its labels and an optional Cohost URN", () => {
-  expect(action.params?.map(p => p.key)).toEqual(["type", "data", "mappedUrn", "mappedUrnLabels", "urn"]);
+test("asks only for type, data, mapped URN, its labels and digest, and an optional Cohost URN", () => {
+  expect(action.params?.map(p => p.key)).toEqual(["type", "data", "mappedUrn", "mappedUrnLabels", "mappedUrnDigest", "urn"]);
+});
+
+test("sends the mapped URN digest to be stamped after the write", async () => {
+  const { ctx, calls } = mockCtx([{ body: { status: "ok", data: { ...saved, mappedUrnDigest: "v1:abc" } } }]);
+  const out = await action.execute({ type: "order", data: {}, mappedUrn, mappedUrnDigest: "v1:abc" }, ctx);
+  expect(JSON.parse(calls[0].body!)).toEqual({ type: "order", data: {}, mappedUrn, mappedUrnDigest: "v1:abc" });
+  expect(out).toMatchObject({ mappedUrnDigest: "v1:abc" });
 });
 
 test("sends our URN alone when given", async () => {
@@ -37,6 +44,8 @@ test.each([
   { type: "event", data: {}, mappedUrn: { urn: mappedUrn } },
   { type: "event", data: {}, mappedUrn, mappedUrnLabels: [] },
   { type: "event", data: {}, mappedUrn, mappedUrnLabels: "x" },
+  { type: "event", data: {}, mappedUrn, mappedUrnDigest: 5 },
+  { type: "event", data: {}, urn, mappedUrnDigest: "v1:abc" },
 ])("invalid input fails before making a request: %j", async input => {
   const { ctx, calls } = mockCtx([]);
   await expect(action.execute(input as never, ctx)).rejects.toThrow();

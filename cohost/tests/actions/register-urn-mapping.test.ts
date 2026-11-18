@@ -28,7 +28,16 @@ test("no labels are preset, and a label named urn cannot redirect the mapping", 
   expect(JSON.parse(calls[1].body!).resources[0].urn).toBe(mappedUrn);
 });
 
+test("sends a digest to store on the mapped URN only when given", async () => {
+  const { ctx, calls } = mockCtx([{ body: {} }, { body: {} }]);
+  await action.execute({ urn, mappedUrn, digest: "v1:abc" }, ctx);
+  expect(JSON.parse(calls[0].body!).digest).toBe("v1:abc");
+  await action.execute({ urn, mappedUrn, digest: "" }, ctx);
+  expect(JSON.parse(calls[1].body!)).not.toHaveProperty("digest");
+});
+
 test.each([
+  { urn, mappedUrn, digest: 5 },
   { urn: "not-a-urn", mappedUrn },
   { urn, mappedUrn: "urn:1:other:conn_eb:/events/123" },
   { urn, mappedUrn: urn },

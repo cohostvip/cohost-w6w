@@ -8,6 +8,7 @@ interface Input {
   data: Record<string, unknown>;
   mappedUrn?: string;
   mappedUrnLabels?: Record<string, unknown>;
+  mappedUrnDigest?: string | null;
   urn?: string;
 }
 
@@ -23,6 +24,8 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  * updates it, or inserts the object and records the mapping (with `mappedUrnLabels`).
  * A ticket's or order's `data.event_urn` names its event. `urn` (ours) only forces a
  * specific Cohost object. One identity is required, so a retried step never duplicates.
+ * `mappedUrnDigest` (from Compute Digest) is stamped on the mapped URN after the write
+ * succeeds, so Validate URN Digest can skip the object next time while it is unchanged.
  */
 const syncObject: ActionDefinition<Input> = {
   key: "sync-object",
@@ -66,6 +69,13 @@ const syncObject: ActionDefinition<Input> = {
       hint: 'Labels merged onto the mapping, e.g. { "source": "eventbrite" }; searchable with Find Mapped Resources.',
     },
     {
+      key: "mappedUrnDigest",
+      label: "Mapped URN Digest",
+      type: "string",
+      required: false,
+      hint: "Optional: the remote object's digest (from Compute Digest), saved on the Mapped URN once the write succeeds. Validate URN Digest compares against it.",
+    },
+    {
       key: "urn",
       label: "Cohost URN",
       type: "string",
@@ -78,6 +88,7 @@ const syncObject: ActionDefinition<Input> = {
     { key: "urn", type: "string", label: "Cohost URN" },
     { key: "mappedUrn", type: "string", label: "Mapped URN" },
     { key: "mappedUrnLabels", type: "object", label: "Mapped URN Labels" },
+    { key: "mappedUrnDigest", type: "string", label: "Mapped URN Digest" },
     { key: "id", type: "string", label: "Cohost ID" },
     { key: "data", type: "object", label: "Saved Object" },
     { key: "meta", type: "object", label: "Write Meta (action, changed)" },
@@ -85,13 +96,17 @@ const syncObject: ActionDefinition<Input> = {
   async execute(input, ctx) {
     if (!TYPES.includes(input.type)) throw new Error(`Type must be one of ${TYPES.join(", ")}.`);
     if (!isObject(input.data)) throw new Error("Data must be a JSON object.");
-    const { mappedUrn, mappedUrnLabels, urn } = input;
+    const { mappedUrn, mappedUrnLabels, mappedUrnDigest, urn } = input;
     if (mappedUrn !== undefined && (typeof mappedUrn !== "string" || !mappedUrn)) {
       throw new Error("Mapped URN must be a URN string.");
     }
     if (mappedUrnLabels !== undefined && !isObject(mappedUrnLabels)) {
       throw new Error('Mapped URN Labels must be a JSON object, e.g. { "source": "eventbrite" }.');
     }
+    if (mappedUrnDigest != null && (typeof mappedUrnDigest !== "string" || !mappedUrnDigest)) {
+      throw new Error("Mapped URN Digest must be a digest string.");
+    }
+    if (mappedUrnDigest && !mappedUrn) throw new Error("Mapped URN Digest needs a Mapped URN.");
     if (!urn && !mappedUrn) throw new Error("Pass the Mapped URN (or a Cohost URN).");
     ctx.log("info", "syncing object", { type: input.type, mappedUrn, urn });
     return new CohostClient(ctx).request("/rms/sync", {
@@ -101,6 +116,7 @@ const syncObject: ActionDefinition<Input> = {
         data: input.data,
         ...(mappedUrn ? { mappedUrn } : {}),
         ...(mappedUrnLabels ? { mappedUrnLabels } : {}),
+        ...(mappedUrnDigest ? { mappedUrnDigest } : {}),
         ...(urn ? { urn } : {}),
       },
     });
