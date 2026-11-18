@@ -1,3 +1,17 @@
+// lib/params.ts
+var companyIdParam = (hint) => {
+  const param = {
+    key: "companyId",
+    label: "Company ID",
+    type: "string",
+    required: true,
+    hidden: true,
+    default: "{{ const.account_id }}",
+    hint
+  };
+  return param;
+};
+
 // lib/outbound.ts
 function ebDateTime(value) {
   const date = new Date(value);
@@ -430,7 +444,7 @@ var eventbriteToCohostAction = {
   requiresAuth: false,
   params: [
     { key: "data", label: "Eventbrite Data (JSON)", type: "json", required: true },
-    { key: "companyId", label: "Company ID", type: "string", required: true, default: "{{ const.account_id }}", hint: "The Cohost company the converted objects belong to. Part of each source URN. Defaults to this account." },
+    companyIdParam("The Cohost company the converted objects belong to. Part of each source URN. Defaults to this account."),
     { key: "connectionId", label: "Connection ID", type: "string", required: true, hint: "The Eventbrite connection, e.g. conn_\u2026 Part of each source URN." },
     { key: "currency", label: "Fallback Currency", type: "string", hint: "Used for standalone tickets without a cost currency. Nested tickets use the event currency. Defaults to USD." }
   ],
@@ -581,7 +595,7 @@ var resourceUriToUrnAction = {
   requiresAuth: false,
   params: [
     { key: "resourceUri", label: "Resource URI", type: "string", required: true, hint: "e.g. https://www.eventbriteapi.com/v3/events/123/ticket_classes/456/" },
-    { key: "companyId", label: "Company ID", type: "string", required: true, hint: "The Cohost company the URN belongs to." },
+    companyIdParam("The Cohost company the URN belongs to. Defaults to this account."),
     { key: "connectionId", label: "Connection ID", type: "string", required: true, hint: "The Eventbrite connection, e.g. conn_\u2026" }
   ],
   execute(input) {
