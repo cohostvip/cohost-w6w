@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { cohostOrderToEventbrite, eventbriteOrderToCohost } from "../lib/orders.ts";
+import { cohostOrderToEventbrite, eventbriteOrderSource, eventbriteOrderToCohost } from "../lib/orders.ts";
 import type { EbOrder } from "../lib/types.ts";
 
 const ebOrder: EbOrder = {
@@ -110,4 +110,41 @@ test("cohostOrderToEventbrite: round-trips totals and attendees", () => {
   expect(back.attendees).toHaveLength(2);
   expect(back.attendees?.[0]).toMatchObject({ id: "att_1", ticket_class_id: "tc_1", ticket_class_name: "General Admission", quantity: 1 });
   expect(back.attendees?.[0].costs?.gross?.value).toBe(2925);
+});
+
+test("eventbriteOrderToCohost: the order-level fee includes Eventbrite's tax on fees (display_tax), matching its items", () => {
+  // Shaped like a live list-orders response: Eventbrite folds the fee tax into each attendee's
+  // eventbrite_fee, but reports it on the order separately as display_tax (eventbrite.gts.tax).
+  const usd = (value: number) => ({ currency: "USD", value });
+  const attendee = (id: string) => ({
+    id,
+    ticket_class_id: "tc_1",
+    quantity: 1,
+    costs: { base_price: usd(7700), eventbrite_fee: usd(968), payment_fee: usd(237), tax: usd(0), gross: usd(8905) },
+  });
+  const o = eventbriteOrderToCohost({
+    id: "ord_2",
+    status: "placed",
+    currency: "USD",
+    costs: {
+      base_price: usd(15400),
+      eventbrite_fee: usd(928),
+      payment_fee: usd(474),
+      tax: usd(0),
+      display_tax: { name: "eventbrite.gts.tax", tax: usd(1008) },
+      gross: usd(17810),
+    },
+    attendees: [attendee("a1"), attendee("a2")],
+  });
+  expect(o.costs.fee).toBe("USD,2410"); // eventbrite_fee + payment_fee + display_tax
+  expect(o.costs.gross).toBe("USD,17810"); // Eventbrite's gross
+  expect(o.costs.total).toBe("USD,17810");
+  const itemGross = o.items.reduce((sum, i) => sum + Number(String(i.costs.gross).split(",")[1]), 0);
+  expect(itemGross).toBe(17810); // the order equals the sum of its items
+});
+
+test("eventbriteOrderSource: the account is the Eventbrite organization when the order carries it", () => {
+  expect(eventbriteOrderSource({ id: "1", event_id: "9" }).account).toBeUndefined();
+  expect(eventbriteOrderSource({ id: "1", organization_id: "158502474690" }).account).toBe("158502474690");
+  expect(eventbriteOrderSource({ id: "1", event: { id: "9", organization_id: 158502474690 } }).account).toBe("158502474690");
 });

@@ -46,7 +46,7 @@ collection. Imported objects are stamped with `source: "eventbrite"` and `source
 
 ### Eventbrite resolver
 
-Call `eventbrite-to-cohost` with `{ data: payload, companyId, connectionId, currency?: "USD" }`. The resolver
+Call `eventbrite-to-cohost` with `{ data: payload, companyId, connectionId, currency?: "USD", enrich?: false }`. The resolver
 identifies object families by their fields, without requiring an object-type
 parameter or relying on IDs or URLs:
 
@@ -55,14 +55,14 @@ parameter or relying on IDs or URLs:
 | Event (`name.text`, `start`, or `end`) | `{ type: "event", urn, data }` — `data` is the Cohost event |
 | Event expanded with `ticket_classes` | `{ type: "event", urn, data }` — mapped tickets stay inside it as `data.tickets` |
 | Ticket class (`cost`, `free`, `donation`, `quantity_total`, or `on_sale_status`) | `{ type: "ticket", urn, data }` — `data` is the Cohost ticket |
-| Order (`costs`, buyer fields, or `attendees` with `id`/`status`) | `{ type: "order", urn, data }` — `data` is the Cohost order; each attendee becomes one `items` entry |
+| Order (`costs`, buyer fields, or `attendees` with `id`/`status`) | `{ type: "order", urn, data }` — `data` is the body of Cohost's `POST /v1/orders`: `{ order, source, attendees? }`; each attendee becomes one `order.items` entry |
 | Array of supported inputs | Array of `{ type, urn, data }` results, in the same order |
 | `{ events: [...], pagination }` | `{ events: [{ type, urn, data }, ...], pagination }` |
 | `{ ticket_classes: [...], pagination }` | `{ tickets: [{ type, urn, data }, ...], pagination }` |
 | `{ orders: [...], pagination }` | `{ orders: [{ type, urn, data }, ...], pagination }` |
 
 Every converted object has the same envelope, so `.type` and `.urn` are always at the top level.
-`urn` is also stamped on `data` (and on each nested ticket in `data.tickets`).
+`urn` is also stamped on `data` (on `data.order` for an order, and on each nested ticket in `data.tickets`).
 Tickets and orders also get `event_urn` — Eventbrite's `event_id` (or a nested ticket's
 parent event) as the event's URN — so Cohost's Sync Object can resolve it to the synced
 Cohost event (an order's context is built from it). `event_id` itself is not carried over.
@@ -70,13 +70,28 @@ With `event_id`, an order item's `offeringId` is its ticket class's URN
 (`…/events/<id>/ticket_classes/<id>`), so Cohost matches it to the synced ticket; an
 item that matches no ticket of the event fails the order instead of being dropped.
 
+#### Orders: `{ order, source, attendees? }`
+
+An order's `data` can be submitted as is to `POST /v1/orders` (or as Sync Object's `data`):
+
+- `order` — the Cohost order. `contextId` is the event's URN (same as `event_urn`), which
+  the server resolves through the event's mapping.
+- `source` — the external system of record: `system: "eventbrite"`, `externalId` (the raw
+  order id), `eventId`, `urn`, `changedAt`, `status` (Eventbrite's own) and `payload` (the
+  raw order, kept for support). The account and connection come from the caller's token.
+- `attendees` — only with **Enrich for insert** (`enrich: true`): one per Eventbrite
+  attendee, `{ orderItemId, index, urn, profile, barcodes, checkedIn, status }`, bound to
+  its item by the attendee id. Cohost creates each ticket holder with its Eventbrite
+  barcode and profile instead of the buyer and a generated barcode. Status precedence:
+  refunded > cancelled > checked in > attending.
+
 Pagination is optional and preserved when supplied. Listings also convert expanded
 children. A ticket's own cost currency takes precedence; otherwise nested tickets
 use the event currency, and standalone tickets use the optional `currency`
 parameter (default `USD`). Missing or null event ticket expansions omit `tickets`;
 an empty expansion becomes `tickets: []`.
 
-The conversion function accepts `eventbriteToCohost(object, context, fallbackCurrency?)`.
+The conversion function accepts `eventbriteToCohost(object, context, fallbackCurrency?, { enrich? })`.
 Context identifies the owning company and the source connection, separately from the action runtime:
 
 ```json

@@ -41,7 +41,8 @@ test("eventbrite-to-cohost: detects an order", async () => {
     { ...context, data: { id: "o1", status: "placed", currency: "USD", costs: { base_price: { currency: "USD", value: 100 } } } },
     ctx,
   );
-  expect(out).toMatchObject({ type: "order", data: { orderNumber: "o1" } });
+  expect(out).toMatchObject({ type: "order", data: { order: { orderNumber: "o1" }, source: { system: "eventbrite", externalId: "o1" } } });
+  expect(out).not.toHaveProperty("data.attendees");
 });
 
 test("app registers the two directional resolvers and the URN helper", () => {
@@ -73,4 +74,14 @@ test("cohost-to-eventbrite: detects tickets and orders", async () => {
   expect(ticket).toEqual({ name: "GA", cost: "EUR,2500", hidden: false });
   const { data: order } = await ebToCohost.execute({ ...context, data: { id: "order-1", costs: {} } }, ctx) as Converted<"order">;
   expect(await cohostToEb.execute({ data: order }, ctx)).toMatchObject({ id: "order-1", attendees: [] });
+});
+
+test("eventbrite-to-cohost: the Enrich for insert checkbox adds data.attendees", async () => {
+  const param = ebToCohost.params?.find(p => p.key === "enrich");
+  expect(param).toMatchObject({ type: "boolean", default: false });
+  const order = { id: "o1", status: "placed", email: "a@b.co", attendees: [{ id: "a1", barcodes: [{ barcode: "B1" }] }] };
+  const plain = await ebToCohost.execute({ ...context, data: order }, ctx) as Converted<"order">;
+  expect(plain.data).not.toHaveProperty("attendees");
+  const enriched = await ebToCohost.execute({ ...context, data: order, enrich: true }, ctx) as Converted<"order">;
+  expect(enriched.data.attendees).toMatchObject([{ orderItemId: "a1", barcodes: ["B1"] }]);
 });

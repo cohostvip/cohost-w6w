@@ -37,7 +37,7 @@ test("every mapped event, nested ticket, and order receives its source URN", () 
     expect(ticket.urn).toBe(`urn:1:${context.companyId}:${context.connectionId}:/events/${input.id}/ticket_classes/${input.ticket_classes[index].id}`);
   }
   const orderInput = createEventbriteOrdersFixture({ type: "expanded_order" });
-  const order = (eventbriteToCohost(orderInput, context) as Converted<"order">).data;
+  const order = (eventbriteToCohost(orderInput, context) as Converted<"order">).data.order;
   expect(order.urn).toBe(`urn:1:${context.companyId}:${context.connectionId}:/orders/${orderInput.id}`);
   expect(input).toEqual(original);
 });
@@ -67,7 +67,8 @@ test("all records in arrays and listings have URNs; envelopes do not", () => {
   expect(orders).not.toHaveProperty("urn");
   for (const object of [...events.events, ...orders.orders]) {
     expect(object.urn).toMatch(/^urn:1:/);
-    expect(object.data.urn).toBe(object.urn);
+    const data = object.data as { urn?: string; order?: { urn?: string } };
+    expect(object.type === "order" ? data.order?.urn : data.urn).toBe(object.urn);
   }
   const array = eventbriteToCohost([
     createEventbriteFixture({ type: "event" }),
