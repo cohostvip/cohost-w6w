@@ -31,6 +31,7 @@ import listOrders from "./actions/list-orders.ts";
 import getOrder from "./actions/get-order.ts";
 import listOrderAttendees from "./actions/list-order-attendees.ts";
 import sendOrderConfirmation from "./actions/send-order-confirmation.ts";
+import upsertOrder from "./actions/upsert-order.ts";
 
 // Coupons
 import listCoupons from "./actions/list-coupons.ts";
@@ -55,8 +56,6 @@ import findMappedResources from "./actions/find-mapped-resources.ts";
 import resolveUrn from "./actions/resolve-urn.ts";
 import registerUrnMapping from "./actions/register-urn-mapping.ts";
 import syncObject from "./actions/sync-object.ts";
-import validateUrnDigest from "./actions/validate-urn-digest.ts";
-import computeDigest from "./actions/compute-digest.ts";
 
 // Formatting (pure, no API call)
 import friendlyValue from "./actions/friendly-value.ts";
@@ -81,11 +80,10 @@ import { withFriendlyOutput } from "./lib/friendly-output.ts";
  * Node/React SDK in the browser, one HTTP round-trip per user keystroke —
  * not something a backend workflow orchestrates. w6w is for backend ops.
  *
- * The `urn` actions (`find-mapped-resources`, `resolve-urn`, `register-urn-mapping`, `sync-object`,
- * `validate-urn-digest`) also sit outside it: they read and write the private RMS endpoints
+ * The `urn` actions (`find-mapped-resources`, `resolve-urn`, `register-urn-mapping`, `sync-object`)
+ * also sit outside it: they read and write the private RMS endpoints
  * (`/rms/urn/*`, `/rms/sync`), which the SDK does not publish, so a workflow can follow a Cohost record
- * to its connected copies, upsert synced events, tickets and orders by URN in one step, and skip
- * re-importing records whose content digest is unchanged (`compute-digest` makes the digest locally).
+ * to its connected copies, and upsert synced events, tickets and orders by URN in one step.
  *
  * Two more actions sit outside that mirror: `friendly-value` and `friendly-data`
  * turn Cohost amounts and UTC timestamps into display-ready fields (see
@@ -136,6 +134,7 @@ export default {
     getOrder,
     listOrderAttendees,
     sendOrderConfirmation,
+    upsertOrder,
     // coupons
     listCoupons,
     createCoupon,
@@ -156,9 +155,7 @@ export default {
     resolveUrn,
     registerUrnMapping,
     syncObject,
-    validateUrnDigest,
     // formatting
-    computeDigest,
     friendlyValue,
     friendlyData,
   ].map(withFriendlyOutput),

@@ -5,7 +5,6 @@ interface Input {
   urn: string;
   mappedUrn: string;
   labels?: Record<string, unknown>;
-  digest?: string;
 }
 
 const parse = (urn: string) => {
@@ -37,17 +36,12 @@ const registerUrnMapping: ActionDefinition<Input> = {
       key: "labels", label: "Labels", type: "json", required: false,
       hint: "Optional JSON object saved on the mapped resource. Find Mapped Resources can filter by these labels. Existing labels are merged; no labels are added by default.",
     },
-    {
-      key: "digest", label: "Digest", type: "string", required: false,
-      hint: "Optional content digest of the mapped resource (from Compute Digest), saved on it for Validate URN Digest. Empty keeps the stored one.",
-    },
   ],
   output: [
     { key: "urn", type: "string", label: "Mapped Resource URN" },
     { key: "labels", type: "object", label: "Labels" },
     { key: "resourceUrns", type: "array", label: "Resource URNs" },
     { key: "resources", type: "object", label: "Mapped Resources" },
-    { key: "digest", type: "string", label: "Digest" },
   ],
   async execute(input, ctx) {
     const local = parse(input.urn);
@@ -60,9 +54,6 @@ const registerUrnMapping: ActionDefinition<Input> = {
         (input.labels === null || typeof input.labels !== "object" || Array.isArray(input.labels))) {
       throw new Error("Labels must be a JSON object.");
     }
-    if (input.digest !== undefined && input.digest !== "" && typeof input.digest !== "string") {
-      throw new Error("Digest must be a string.");
-    }
     const labels = input.labels ?? {};
     ctx.log("info", "registering urn mapping", { urn: input.urn, mappedUrn: input.mappedUrn });
     return new CohostClient(ctx).request("/rms/urn/mappings", {
@@ -71,7 +62,6 @@ const registerUrnMapping: ActionDefinition<Input> = {
         urn: input.mappedUrn,
         labels,
         resources: [{ ...labels, urn: input.mappedUrn }, { urn: input.urn }],
-        ...(input.digest ? { digest: input.digest } : {}),
       },
     });
   },

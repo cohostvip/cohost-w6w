@@ -14,10 +14,10 @@ test("action keys are unique", () => {
 
 test("one action per backend-ops SDK endpoint", () => {
   // The `format` actions are local conversions and the `urn` actions read private
-  // endpoints — neither is an SDK endpoint. 29 = the 28 catalogued endpoints plus
-  // `get-event-attendee` (`GET /events/{id}/attendees/{attendeeId}`), public but not yet
-  // wrapped by the Node SDK.
-  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(29);
+  // endpoints — neither is an SDK endpoint. 30 = the 28 catalogued endpoints plus two
+  // public ones not yet wrapped by the Node SDK: `get-event-attendee`
+  // (`GET /events/{id}/attendees/{attendeeId}`) and `upsert-order` (`POST /orders`).
+  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(30);
 });
 
 test("every fetch action takes a friendly flag, off by default", () => {
@@ -40,6 +40,18 @@ test("every action is fully declared", () => {
     expect(action.resource, `${action.key} has a resource`).toBeTruthy();
     expect(action.output, `${action.key} declares output`).toBeTruthy();
     expect(typeof action.execute, `${action.key} has an execute hook`).toBe("function");
+  }
+});
+
+test("every required select has a default", () => {
+  // The step form shows a select's first option when it holds no value, but stores nothing:
+  // a required select without a default looks filled yet keeps the step's Next disabled.
+  for (const action of app.actions) {
+    for (const p of action.params ?? []) {
+      if (p.required && Array.isArray(p.options) && p.options.length) {
+        expect(p.default, `${action.key}.${p.key} has a default`).toBeDefined();
+      }
+    }
   }
 });
 

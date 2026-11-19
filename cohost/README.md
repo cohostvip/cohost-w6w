@@ -147,6 +147,15 @@ trigger's declared envelope identical.
 | `get-order` | `GET /orders/{id}` |
 | `list-order-attendees` | `GET /orders/{id}/attendees` |
 | `send-order-confirmation` | `POST /orders/{id}/send-confirmation` |
+| `upsert-order` | `POST /orders` |
+
+**Upsert Order** (`upsert-order`) inserts or updates an order by `order.urn`. Its one
+param, **Order Data**, is the request body as is — `{ order, source?, attendees?, context? }`,
+which is exactly the Eventbrite → Cohost transformer's `data`. `order.contextId` may be the
+event's remote URN (Cohost resolves it through the event's mapping); `attendees` (ticket
+holders bound by `orderItemId`) become the order's attendees, with their own names and
+barcodes. `order.urn` is required so a retried step updates instead of duplicating. Returns
+`{ order, meta }` (`meta.action` is `create` or `update`).
 
 ### Coupons (`resource: coupon`)
 
@@ -200,14 +209,15 @@ deduplicated. Lookups work from either endpoint.
 no router, no separate lookup. It calls `POST /rms/sync` with:
 
 - **Type** — `event`/`ticket`/`order` (a transformer's `type`).
-- **Data** — the object (a transformer's `data`), optionally with `event_urn`.
+- **Data** — the object (a transformer's `data`), optionally with `event_urn`. A
+  transformer's whole output (`{ type, urn, data }`) also works as is: it is unwrapped,
+  its `type` is used, and its `urn` becomes the Mapped URN. With no URN set, the
+  object's own `urn` (`order.urn` for an order body) is used.
 - **Mapped URN** — the remote URN (a transformer's `urn`). Cohost looks up the
   object it is mapped to and updates it; if it is not mapped yet, the object is
   inserted and the mapping recorded.
 - **Mapped URN Labels** — merged onto the mapping, the same way Register URN
   Mapping stores them.
-- **Mapped URN Digest** (optional) — the remote object's content digest (from
-  Compute Digest), stored on the Mapped URN only after the write succeeds.
 - **Cohost URN** (optional) — forces a specific Cohost object; usually empty.
 
 ```json
@@ -224,8 +234,11 @@ synced from) names its event: a ticket is placed under it, and the order's conte
 (`evt_<id>`, organizer) is built from it — so sync the event first. A ticket already
 mapped, or one whose remote parent event is mapped, finds its event without it. An
 event's `data.tickets` are saved with the event. It returns
-`{ type, urn, mappedUrn, mappedUrnLabels, mappedUrnDigest?, id, data, meta }`: our URN, the saved object,
-and `meta.action` (`create`/`update`) with the changed fields.
+`{ type, urn, mappedUrn, mappedUrnLabels, id, data, meta }`: our URN, the saved object,
+and `meta.action` (`create`/`update`) with the changed fields. A payload identical to the
+last one synced to the object is not written again: it returns `meta.action: "unchanged"`
+(`changed: []`) with the object as it is now in `data`. Sync only inserts or updates; it
+never deletes.
 
 For example, `{"purpose":"sync"}` matches a mapped resource whose labels include
 `{"source":"eventbrite","purpose":"sync","category":"ticket"}`. Multiple filter
@@ -236,25 +249,6 @@ records. The API query encodes the filter as a JSON string in `labels`.
 
 `resolve-urn` retains its separate mapping-document resolution contract.
 
-#### Skipping unchanged records (digests)
-
-A daily re-sync does not need to re-import every remote record — only the ones that
-changed. Each remote URN can hold a **digest** of the content it was imported from:
-
-1. **Compute Digest** (`compute-digest`, local, no API call) — `v1:<sha256>` of the
-   object, or of just the **Fields** that matter (dot paths, e.g. for an Eventbrite
-   order `["id", "status", "changed", "costs.gross.value"]`). Key order never matters;
-   a missing field counts as `null`. Use the same field list every time.
-2. **Validate URN Digest** (`validate-urn-digest`, `POST /rms/urn/digest/validate`) —
-   pass the remote **URN** and the **Digest** (or **Data** + **Fields** to compute it
-   in the step). Returns `{ urn, valid, digest }`. `valid` is `true` only when the
-   stored digest matches exactly; it is `false` when the URN was never imported, was
-   imported without a digest, or the content changed.
-3. `valid: true` → skip. `valid: false` → **Sync Object** with
-   `mappedUrnDigest` set to the returned `digest`, which stamps it for next time.
-
-**Register URN Mapping** also takes an optional **Digest** for mappings made by hand.
-
 ### Formatting (`resource: format`)
 
 Local conversions — no API call, no connection needed. They exist because
@@ -264,7 +258,6 @@ Local conversions — no API call, no connection needed. They exist because
 | --- | --- |
 | `friendly-value` | One value: a Cohost amount (`"USD,5500"`) or a UTC timestamp → its friendly form (`{ kind: "unknown" }` for anything else). |
 | `friendly-data` | Any object (order, event, ticket, a list): every amount and UTC timestamp replaced by its friendly form, everything else unchanged. |
-| `compute-digest` | A content digest (`v1:<sha256>`) of an object or of the picked fields — see [Skipping unchanged records](#skipping-unchanged-records-digests). |
 
 An amount becomes `{ kind: "currency", value: 5500, major: 55, display: "$55",
 displayPadded: "$55.00", displayCode: "55.00 USD", currency, symbol, decimals, isZero,
