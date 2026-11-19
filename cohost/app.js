@@ -568,6 +568,28 @@ var ATTENDEE_CHANGED_SAMPLE = payloadSample(
   ATTENDEE_SAMPLE,
   []
 );
+var CHANNEL_EVENT_CHANGED_OUTPUT = [
+  ...payloadOutput("The event as the channel shows this listing", [
+    ...EVENT_OUTPUT,
+    a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)")
+  ]).map(
+    (f) => f.key === "type" ? { ...f, label: "Type (channelEvent)" } : f.key === "meta.changedFields" ? { ...f, label: "Changed fields (e.g. event.name, tickets.<id>.costs, customization)" } : f
+  ),
+  s("meta.channelId", "Channel ID"),
+  s("meta.listingId", "Listing ID (primary, or an extra listing's id)"),
+  o("meta.properties", "Listing properties (values your channel keeps on this listing, e.g. a synced id)")
+];
+var CHANNEL_EVENT_CHANGED_SAMPLE = {
+  ...payloadSample(
+    "channelEvent.changed",
+    `/channels/ch_sample/events/${ID.event}/listings/primary`,
+    { ...EVENT_SAMPLE, name: "Friday Night Social \u2014 on Sample Channel", ticketPrices: ["USD,5500"] },
+    ["tickets.SampleTicket01.costs"],
+    { channelId: "ch_sample", listingId: "primary", properties: { eventbriteId: "1234567890" } }
+  ),
+  type: "channelEvent",
+  id: ID.event
+};
 var OBJECT_CHANGED_OUTPUT = payloadOutput(
   "The object (fields depend on type; same as its get-* action)",
   [s("id", "Object ID")]
@@ -859,6 +881,91 @@ var objectChanged = {
   }
 };
 var object_changed_default = objectChanged;
+
+// triggers/channel-event-changed.ts
+var ACTIONS5 = ["listed", "changed", "unlisted"];
+var DEFAULT_ACTIONS4 = ["listed", "changed", "unlisted"];
+function parseListingPath(resourcePath) {
+  const [channels, channelId, events, eventId, listings, listingId, ...rest] = resourcePath.split("/").filter(Boolean);
+  if (channels !== "channels" || events !== "events" || listings !== "listings" || rest.length > 0) return null;
+  if (!channelId || !eventId || !listingId) return null;
+  return {
+    channelId: decodeURIComponent(channelId),
+    eventId: decodeURIComponent(eventId),
+    listingId: decodeURIComponent(listingId)
+  };
+}
+var channelEventChanged = {
+  key: "channel-event-changed",
+  title: "Channel Event Changed",
+  description: "Fires when an event is listed on, changes on, or is unlisted from one of your sales channels.",
+  params: [
+    {
+      key: "channelId",
+      label: "Channel ID",
+      type: "string",
+      hint: "Only this channel's listings. Leave empty for all of your channels."
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      type: "multiselect",
+      hint: "Leave empty for all.",
+      default: [...DEFAULT_ACTIONS4],
+      options: [
+        { value: "listed", label: "Listed" },
+        { value: "changed", label: "Changed" },
+        { value: "unlisted", label: "Unlisted" }
+      ]
+    }
+  ],
+  output: CHANNEL_EVENT_CHANGED_OUTPUT,
+  sample: CHANNEL_EVENT_CHANGED_SAMPLE,
+  async onSubscribe({ params, callbackUrl }, ctx) {
+    const events = pickValues("actions", params.actions, ACTIONS5, DEFAULT_ACTIONS4).map((a2) => `channelEvent.${a2}`);
+    return subscribeWebhook(ctx, "w6w: channel event changed", callbackUrl, events);
+  },
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
+  },
+  async handleIngest({ raw, params }, ctx) {
+    const ping = pingOf(raw);
+    const listing = parseListingPath(ping.context.resourcePath);
+    if (!listing) return [];
+    const channelFilter = typeof params.channelId === "string" ? params.channelId.trim() : "";
+    if (channelFilter && channelFilter !== listing.channelId) return [];
+    let data = null;
+    if (ping.action !== "channelEvent.unlisted") {
+      try {
+        data = await new CohostClient(ctx).request(`/events/${encodeURIComponent(listing.eventId)}`, {
+          query: { listingId: listing.listingId },
+          headers: { "x-cohost-channel-id": listing.channelId }
+        });
+      } catch (error) {
+        if (!(error instanceof Error && /^Cohost 404 /.test(error.message))) throw error;
+      }
+    }
+    return [{
+      urn: ping.urn,
+      action: ping.action,
+      type: "channelEvent",
+      id: listing.eventId,
+      timestamp: ping.timestamp,
+      data: data ?? null,
+      meta: {
+        changedFields: ping.data?.changedFields ?? [],
+        companyId: ping.context.companyId,
+        eventId: listing.eventId,
+        resourcePath: ping.context.resourcePath,
+        deliveryId: ping.id,
+        channelId: listing.channelId,
+        listingId: listing.listingId,
+        properties: ping.data?.properties ?? {}
+      }
+    }];
+  }
+};
+var channel_event_changed_default = channelEventChanged;
 
 // lib/params.ts
 var paginationParams = [
@@ -1278,6 +1385,57 @@ var updateEventTicket = {
   }
 };
 var update_event_ticket_default = updateEventTicket;
+
+// actions/set-channel-listing-properties.ts
+var setChannelListingProperties = {
+  key: "set-channel-listing-properties",
+  type: "perform",
+  resource: "channel",
+  title: "Set Channel Listing Properties",
+  description: "Set the values your sales channel keeps on an event's listing \u2014 e.g. the id an integration published it under.",
+  idempotent: true,
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "eventId", label: "Event ID", type: "string", required: true },
+    {
+      key: "properties",
+      label: "Properties",
+      type: "json",
+      required: true,
+      hint: 'Keys your channel declares, e.g. { "eventbriteId": "1234567890" }. null clears one.'
+    },
+    {
+      key: "listingId",
+      label: "Listing ID",
+      type: "string",
+      default: "primary",
+      hint: "primary, or an extra listing's id (meta.listingId on Channel Event Changed)."
+    }
+  ],
+  output: [
+    { key: "eventId", type: "string", label: "Event ID" },
+    { key: "channelId", type: "string", label: "Channel ID" },
+    { key: "listingId", type: "string", label: "Listing ID" },
+    { key: "slug", type: "string", label: "Listing slug" },
+    { key: "properties", type: "object", label: "The listing's properties after the write" }
+  ],
+  async execute(input, ctx) {
+    const listingId = input.listingId?.trim() || "primary";
+    if (!input.properties || typeof input.properties !== "object" || Array.isArray(input.properties)) {
+      throw new Error('Properties must be an object, e.g. { "eventbriteId": "1234567890" }');
+    }
+    ctx.log("info", "setting channel listing properties", {
+      channelId: input.channelId,
+      eventId: input.eventId,
+      listingId
+    });
+    return new CohostClient(ctx).request(
+      `/company/sales-channels/${encodeURIComponent(input.channelId)}/events/${encodeURIComponent(input.eventId)}/listings/${encodeURIComponent(listingId)}/properties`,
+      { method: "PATCH", body: { properties: input.properties } }
+    );
+  }
+};
+var set_channel_listing_properties_default = setChannelListingProperties;
 
 // actions/delete-event-ticket.ts
 var deleteEventTicket = {
@@ -2446,6 +2604,8 @@ var index_default = {
     create_organizer_default,
     update_organizer_default,
     delete_organizer_default,
+    // sales channels
+    set_channel_listing_properties_default,
     // users
     get_me_default,
     get_user_default,
@@ -2459,7 +2619,16 @@ var index_default = {
     friendly_value_default,
     friendly_data_default
   ].map(withFriendlyOutput),
-  triggers: [order_placed_default, order_changed_default, order_confirmation_requested_default, event_changed_default, ticket_changed_default, attendee_changed_default, object_changed_default],
+  triggers: [
+    order_placed_default,
+    order_changed_default,
+    order_confirmation_requested_default,
+    event_changed_default,
+    ticket_changed_default,
+    attendee_changed_default,
+    object_changed_default,
+    channel_event_changed_default
+  ],
   auth: [tenant_default, api_token_default]
 };
 export {
