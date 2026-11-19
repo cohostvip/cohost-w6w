@@ -1438,6 +1438,46 @@ var sendOrderConfirmation = {
 };
 var send_order_confirmation_default = sendOrderConfirmation;
 
+// actions/upsert-order.ts
+var BODY_KEYS = ["order", "context", "source", "attendees"];
+var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var upsertOrder = {
+  key: "upsert-order",
+  type: "perform",
+  resource: "order",
+  title: "Upsert Order",
+  description: "Insert or update a Cohost order by its URN. Pass a transformer's converted data ({ order, source, attendees }) as is; the order's event may be given by its remote URN. Returns the saved order.",
+  idempotent: true,
+  params: [
+    {
+      key: "data",
+      label: "Order Data",
+      type: "json",
+      required: true,
+      hint: "{ order, source?, attendees?, context? } \u2014 e.g. the Eventbrite \u2192 Cohost transformer's data. order.urn (the remote order's URN) is required; order.contextId may be the event's remote URN."
+    }
+  ],
+  output: [
+    { key: "order", type: "object", label: "Saved Order" },
+    { key: "meta", type: "object", label: "Write Meta (action, changed)" }
+  ],
+  async execute(input, ctx) {
+    const data = input.data;
+    if (!isObject(data)) throw new Error("Order Data must be a JSON object: { order, source?, attendees? }.");
+    if (!isObject(data.order)) {
+      throw new Error("Order Data needs an order object: { order, source?, attendees? } (pass the transformer's data, not data.order).");
+    }
+    const stray = Object.keys(data).filter((k) => !BODY_KEYS.includes(k));
+    if (stray.length) throw new Error(`Order Data takes ${BODY_KEYS.join(", ")}; got ${stray.join(", ")}.`);
+    const urn = data.order.urn;
+    if (typeof urn !== "string" || !urn) throw new Error("order.urn is required so a retry updates the same order.");
+    if (data.attendees !== void 0 && !Array.isArray(data.attendees)) throw new Error("attendees must be an array.");
+    ctx.log("info", "upserting order", { urn, attendees: Array.isArray(data.attendees) ? data.attendees.length : 0 });
+    return new CohostClient(ctx).request("/orders", { method: "POST", query: { meta: 1 }, body: data });
+  }
+};
+var upsert_order_default = upsertOrder;
+
 // actions/list-coupons.ts
 var listCoupons = {
   key: "list-coupons",
@@ -1480,6 +1520,7 @@ var createCoupon = {
       label: "Discount Type",
       type: "select",
       required: true,
+      default: "percentage",
       options: [
         { value: "percentage", label: "Percentage" },
         { value: "fixed", label: "Fixed amount" }
@@ -1995,13 +2036,19 @@ var register_urn_mapping_default = registerUrnMapping;
 
 // actions/sync-object.ts
 var TYPES2 = ["event", "ticket", "order"];
-var isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var isObject2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var isEnvelope = (value) => Object.keys(value).every((k) => k === "type" || k === "urn" || k === "data") && TYPES2.includes(value.type) && typeof value.urn === "string" && value.urn !== "" && isObject2(value.data);
+var isCohostUrn = (urn) => /^urn:1:[^:]+:cohost-(falcon|puma):/.test(urn);
+var ownUrn = (data) => {
+  const urn = isObject2(data.order) ? data.order.urn : data.urn;
+  return typeof urn === "string" && urn ? urn : void 0;
+};
 var syncObject = {
   key: "sync-object",
   type: "perform",
   resource: "urn",
   title: "Sync Object",
-  description: "Insert or update a Cohost event, ticket or order. Pass the converted object as data, its type, and the remote URN it came from; Cohost updates the object that URN is mapped to, or inserts and maps it. Returns the saved object.",
+  description: "Insert or update a Cohost event, ticket or order. Pass a transformer's output as data (or the object, its type, and the remote URN it came from); Cohost updates the object that URN is mapped to, or inserts and maps it. Returns the saved object.",
   idempotent: true,
   params: [
     {
@@ -2009,6 +2056,7 @@ var syncObject = {
       label: "Type",
       type: "select",
       required: true,
+      default: "event",
       options: [
         { value: "event", label: "Event" },
         { value: "ticket", label: "Ticket" },
@@ -2020,7 +2068,7 @@ var syncObject = {
       label: "Data",
       type: "json",
       required: true,
-      hint: "The object to save, in Cohost's shape (e.g. a transformer's converted `data`)."
+      hint: "The object to save, in Cohost's shape. A transformer's whole output ({ type, urn, data }) works as is: its type and urn are used, so Type and Mapped URN can stay as they are."
     },
     {
       key: "mappedUrn",
@@ -2051,25 +2099,40 @@ var syncObject = {
     { key: "mappedUrnLabels", type: "object", label: "Mapped URN Labels" },
     { key: "id", type: "string", label: "Cohost ID" },
     { key: "data", type: "object", label: "Saved Object" },
-    { key: "meta", type: "object", label: "Write Meta (action, changed)" }
+    { key: "meta", type: "object", label: "Write Meta (action: create, update or unchanged; changed)" }
   ],
   async execute(input, ctx) {
-    if (!TYPES2.includes(input.type)) throw new Error(`Type must be one of ${TYPES2.join(", ")}.`);
-    if (!isObject(input.data)) throw new Error("Data must be a JSON object.");
-    const { mappedUrn, mappedUrnLabels, urn } = input;
-    if (mappedUrn !== void 0 && (typeof mappedUrn !== "string" || !mappedUrn)) {
+    if (!isObject2(input.data)) throw new Error("Data must be a JSON object.");
+    const { mappedUrnLabels } = input;
+    let { type, data, mappedUrn, urn } = input;
+    if (mappedUrn !== void 0 && mappedUrn !== "" && typeof mappedUrn !== "string") {
       throw new Error("Mapped URN must be a URN string.");
     }
-    if (mappedUrnLabels !== void 0 && !isObject(mappedUrnLabels)) {
+    if (urn !== void 0 && urn !== "" && typeof urn !== "string") throw new Error("Cohost URN must be a URN string.");
+    if (isEnvelope(data)) {
+      if (type !== data.type) ctx.log("info", "using the type of the transformer output", { type: data.type });
+      type = data.type;
+      if (!mappedUrn && !urn) mappedUrn = data.urn;
+      data = data.data;
+    }
+    if (!TYPES2.includes(type)) throw new Error(`Type must be one of ${TYPES2.join(", ")}.`);
+    if (mappedUrnLabels !== void 0 && !isObject2(mappedUrnLabels)) {
       throw new Error('Mapped URN Labels must be a JSON object, e.g. { "source": "eventbrite" }.');
     }
-    if (!urn && !mappedUrn) throw new Error("Pass the Mapped URN (or a Cohost URN).");
-    ctx.log("info", "syncing object", { type: input.type, mappedUrn, urn });
+    if (!urn && !mappedUrn) {
+      const own = ownUrn(data);
+      if (own && isCohostUrn(own)) urn = own;
+      else mappedUrn = own;
+    }
+    if (!urn && !mappedUrn) {
+      throw new Error("No URN to sync by: pass a transformer's output as Data, or set the Mapped URN (or a Cohost URN).");
+    }
+    ctx.log("info", "syncing object", { type, mappedUrn, urn });
     return new CohostClient(ctx).request("/rms/sync", {
       method: "POST",
       body: {
-        type: input.type,
-        data: input.data,
+        type,
+        data,
         ...mappedUrn ? { mappedUrn } : {},
         ...mappedUrnLabels ? { mappedUrnLabels } : {},
         ...urn ? { urn } : {}
@@ -2371,6 +2434,7 @@ var index_default = {
     get_order_default,
     list_order_attendees_default,
     send_order_confirmation_default,
+    upsert_order_default,
     // coupons
     list_coupons_default,
     create_coupon_default,

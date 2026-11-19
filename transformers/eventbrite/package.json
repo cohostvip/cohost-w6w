@@ -1,6 +1,6 @@
 {
   "name": "eventbrite-transformer-w6w",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "w6w transformer app — map Eventbrite objects (events, ticket classes, orders) to/from Cohost objects. Pure, offline shape conversions.",
   "license": "MIT",
   "author": {

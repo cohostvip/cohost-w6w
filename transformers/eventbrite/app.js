@@ -132,7 +132,7 @@ function eventbriteOrderToCohost(eb) {
   const currency = (eb.currency ?? eb.costs?.gross?.currency ?? "USD").toUpperCase();
   const c = eb.costs ?? {};
   const subtotal = c.base_price?.value ?? 0;
-  const fee = (c.eventbrite_fee?.value ?? 0) + (c.payment_fee?.value ?? 0);
+  const fee = (c.eventbrite_fee?.value ?? 0) + (c.payment_fee?.value ?? 0) + (c.display_tax?.tax?.value ?? 0);
   const tax = c.tax?.value ?? 0;
   const gross = subtotal + fee;
   const total = gross + tax;
@@ -153,6 +153,8 @@ function eventbriteOrderToCohost(eb) {
     currency,
     customer: {
       name: name || (eb.email ?? "Guest"),
+      first: eb.first_name,
+      last: eb.last_name,
       firstName: eb.first_name,
       lastName: eb.last_name,
       email: eb.email ?? null,
@@ -191,6 +193,53 @@ function attendeeItems(attendees, currency) {
     };
   });
 }
+function eventbriteOrderSource(eb, urn) {
+  const org = eb.organization_id ?? eb.event?.organization_id;
+  return {
+    system: "eventbrite",
+    ...org != null && org !== "" ? { account: String(org) } : {},
+    externalId: String(eb.id),
+    eventId: eb.event_id ?? null,
+    ...urn ? { urn } : {},
+    changedAt: eb.changed ?? null,
+    status: eb.status ?? null,
+    payload: structuredClone(eb)
+  };
+}
+function attendeeStatus(a) {
+  if (a.refunded) return "refunded";
+  if (a.cancelled) return "cancelled";
+  const status = (a.status ?? "").toLowerCase();
+  if (a.checked_in || status === "checked in") return "checkedIn";
+  if (status === "attending") return "attending";
+  return "unknown";
+}
+function attendeeProfile(a) {
+  const p = a.profile;
+  if (!p || !(p.name || p.first_name || p.last_name || p.email)) return null;
+  const first = p.first_name?.trim() || void 0;
+  const last = p.last_name?.trim() || void 0;
+  const name = p.name?.trim() || [first, last].filter(Boolean).join(" ") || p.email || "";
+  return {
+    name,
+    displayName: name,
+    ...first ? { first } : {},
+    ...last ? { last } : {},
+    email: p.email ?? null,
+    phone: p.cell_phone ?? null
+  };
+}
+function eventbriteOrderAttendees(eb, urnFor) {
+  return (eb.attendees ?? []).filter((a) => typeof a.id === "string" && a.id !== "").map((a) => ({
+    orderItemId: a.id,
+    index: 0,
+    ...urnFor ? { urn: urnFor(a.id) } : {},
+    profile: attendeeProfile(a),
+    barcodes: (a.barcodes ?? []).map((b) => b.barcode).filter((b) => typeof b === "string" && b !== ""),
+    checkedIn: a.checked_in === true,
+    status: attendeeStatus(a)
+  }));
+}
 var COHOST_TO_EB_STATUS = {
   placed: "placed",
   refunded: "refunded",
@@ -220,8 +269,8 @@ function cohostOrderToEventbrite(order) {
   return {
     id: order.sourceId ?? order.orderNumber,
     name: order.customer.name,
-    first_name: order.customer.firstName,
-    last_name: order.customer.lastName,
+    first_name: order.customer.first ?? order.customer.firstName,
+    last_name: order.customer.last ?? order.customer.lastName,
     email: order.customer.email ?? void 0,
     status: COHOST_TO_EB_STATUS[order.status] ?? "placed",
     currency,
@@ -347,14 +396,15 @@ function sourceId(value, path) {
   }
   return encodeURIComponent(value);
 }
-function mapObject(value, kind, context, currency, path, parentEventId) {
+function mapObject(value, kind, settings, path, parentEventId) {
+  const { context, currency } = settings;
   switch (kind) {
     case "event": {
       const event = eventbriteEventToCohost(value);
       if (value.ticket_classes != null) {
         if (!Array.isArray(value.ticket_classes)) fail(`${path}.ticket_classes`, "Expected an array.");
         event.tickets = value.ticket_classes.map(
-          (ticket, index) => resolveObject(ticket, context, event.currency, `${path}.ticket_classes[${index}]`, "ticket", value.id)
+          (ticket, index) => resolveObject(ticket, { ...settings, currency: event.currency }, `${path}.ticket_classes[${index}]`, "ticket", value.id)
         );
       }
       event.urn = generateUrn(`/events/${sourceId(value.id, `${path}.id`)}`, context);
@@ -379,35 +429,44 @@ function mapObject(value, kind, context, currency, path, parentEventId) {
         });
       }
       const order = eventbriteOrderToCohost(value);
+      const orderPath = `/orders/${sourceId(value.id, `${path}.id`)}`;
+      let eventPath;
       if (value.event_id != null) {
-        const eventPath = `/events/${sourceId(value.event_id, `${path}.event_id`)}`;
+        eventPath = `/events/${sourceId(value.event_id, `${path}.event_id`)}`;
         order.event_urn = generateUrn(eventPath, context);
+        order.contextId = order.event_urn;
         order.items = order.items.map((item, index) => item.offeringId === "unknown" ? item : {
           ...item,
           offeringId: generateUrn(`${eventPath}/ticket_classes/${sourceId(item.offeringId, `${path}.items[${index}].offeringId`)}`, context)
         });
       }
-      return { ...order, urn: generateUrn(`/orders/${sourceId(value.id, `${path}.id`)}`, context) };
+      order.urn = generateUrn(orderPath, context);
+      const payload = { order, source: eventbriteOrderSource(value, order.urn) };
+      if (settings.enrich) {
+        payload.attendees = eventbriteOrderAttendees(value, (attendeeId) => generateUrn(`${eventPath ?? orderPath}/attendees/${sourceId(attendeeId, `${path}.attendees.id`)}`, context));
+      }
+      return payload;
     }
   }
 }
-function resolveObject(value, context, currency, path, expected, parentEventId) {
+function resolveObject(value, settings, path, expected, parentEventId) {
   if (!isObject(value)) fail(path, "Expected an Eventbrite object.");
   const kind = identify(value, path);
   if (!kind) fail(path, "Unrecognized Eventbrite object; expected an event, ticket class, or order.");
   if (expected && kind !== expected) fail(path, `Expected an Eventbrite ${expected}, received ${kind}.`);
-  return mapObject(value, kind, context, currency, path, parentEventId);
+  return mapObject(value, kind, settings, path, parentEventId);
 }
 function wrap(type, data) {
-  return { type, urn: data.urn, data };
+  const urn = type === "order" ? data.order.urn : data.urn;
+  return { type, urn, data };
 }
-function resolve(value, context, currency, path) {
+function resolve(value, settings, path) {
   if (Array.isArray(value)) {
-    return value.map((item, index) => resolve(item, context, currency, `${path}[${index}]`));
+    return value.map((item, index) => resolve(item, settings, `${path}[${index}]`));
   }
   if (!isObject(value)) fail(path, "Expected an Eventbrite object, array, or listing response.");
   const kind = identify(value, path);
-  if (kind) return wrap(kind, mapObject(value, kind, context, currency, path));
+  if (kind) return wrap(kind, mapObject(value, kind, settings, path));
   const keys = ["events", "ticket_classes", "orders"].filter((key2) => key2 in value);
   if (keys.length > 1) fail(path, "Ambiguous listing; expected exactly one of events, ticket_classes, or orders.");
   const key = keys[0];
@@ -421,16 +480,16 @@ function resolve(value, context, currency, path) {
   }
   switch (key) {
     case "events":
-      return { events: items.map((item, index) => wrap("event", resolveObject(item, context, currency, `${path}.events[${index}]`, "event"))), ...metadata };
+      return { events: items.map((item, index) => wrap("event", resolveObject(item, settings, `${path}.events[${index}]`, "event"))), ...metadata };
     case "ticket_classes":
-      return { tickets: items.map((item, index) => wrap("ticket", resolveObject(item, context, currency, `${path}.ticket_classes[${index}]`, "ticket"))), ...metadata };
+      return { tickets: items.map((item, index) => wrap("ticket", resolveObject(item, settings, `${path}.ticket_classes[${index}]`, "ticket"))), ...metadata };
     case "orders":
-      return { orders: items.map((item, index) => wrap("order", resolveObject(item, context, currency, `${path}.orders[${index}]`, "order"))), ...metadata };
+      return { orders: items.map((item, index) => wrap("order", resolveObject(item, settings, `${path}.orders[${index}]`, "order"))), ...metadata };
   }
 }
-function eventbriteToCohost(object, context, fallbackCurrency = "USD") {
+function eventbriteToCohost(object, context, fallbackCurrency = "USD", options = {}) {
   validateConversionContext(context);
-  return resolve(object, context, fallbackCurrency, "data");
+  return resolve(object, { context, currency: fallbackCurrency, enrich: options.enrich === true }, "data");
 }
 
 // actions/eventbrite-to-cohost.ts
@@ -439,18 +498,19 @@ var eventbriteToCohostAction = {
   type: "perform",
   resource: "transform",
   title: "Eventbrite \u2192 Cohost",
-  description: "Detect and convert Eventbrite events, ticket classes, orders, arrays, and listings, including expanded tickets and attendees.",
+  description: "Detect and convert Eventbrite events, ticket classes, orders, arrays, and listings, including expanded tickets and attendees. An order converts to the body of Cohost's Upsert Order: { order, source, attendees? }.",
   idempotent: true,
   requiresAuth: false,
   params: [
     { key: "data", label: "Eventbrite Data (JSON)", type: "json", required: true },
     companyIdParam("The Cohost company the converted objects belong to. Part of each source URN. Defaults to this account."),
     { key: "connectionId", label: "Connection ID", type: "string", required: true, hint: "The Eventbrite connection, e.g. conn_\u2026 Part of each source URN." },
-    { key: "currency", label: "Fallback Currency", type: "string", hint: "Used for standalone tickets without a cost currency. Nested tickets use the event currency. Defaults to USD." }
+    { key: "currency", label: "Fallback Currency", type: "string", hint: "Used for standalone tickets without a cost currency. Nested tickets use the event currency. Defaults to USD." },
+    { key: "enrich", label: "Enrich for insert", type: "boolean", default: false, hint: "Orders: also return the ticket holders as data.attendees (name, email, barcodes, check-in, status), so Cohost creates each attendee with Eventbrite's barcode. Needs the order expanded with attendees." }
   ],
   execute(input) {
     const context = input.context ?? { companyId: input.companyId, connectionId: input.connectionId };
-    return eventbriteToCohost(input.data, context, input.currency ?? "USD");
+    return eventbriteToCohost(input.data, context, input.currency ?? "USD", { enrich: input.enrich === true });
   }
 };
 var eventbrite_to_cohost_default = eventbriteToCohostAction;
@@ -507,7 +567,10 @@ function mapObject2(value, kind, fallbackCurrency, path) {
   }
 }
 function unwrap(value) {
-  return isObject2(value) && typeof value.urn === "string" && isObject2(value.data) && (value.type === "event" || value.type === "ticket" || value.type === "order") ? value.data : value;
+  if (isObject2(value) && typeof value.urn === "string" && isObject2(value.data) && (value.type === "event" || value.type === "ticket" || value.type === "order")) {
+    value = value.data;
+  }
+  return isObject2(value) && isObject2(value.order) && !("customer" in value) && !("items" in value) ? value.order : value;
 }
 function resolveObject2(value, currency, path, expected) {
   value = unwrap(value);
