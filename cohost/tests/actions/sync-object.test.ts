@@ -18,8 +18,35 @@ test("sync-object: posts the envelope to /rms/sync and returns the saved object"
   expect(action.idempotent).toBe(true);
 });
 
-test("asks only for type, data, mapped URN, its labels and an optional Cohost URN", () => {
+test("asks only for type, data, mapped URN, its labels, and an optional Cohost URN", () => {
   expect(action.params?.map(p => p.key)).toEqual(["type", "data", "mappedUrn", "mappedUrnLabels", "urn"]);
+});
+
+test("takes a transformer's whole output as data: unwraps it, its type wins, its urn is the mapped URN", async () => {
+  const { ctx, calls } = mockCtx([{ body: { status: "ok", data: {} } }]);
+  const event = { urn: mappedUrn, name: "Fest" };
+  await action.execute({ type: "order", data: { type: "event", urn: mappedUrn, data: event } }, ctx);
+  expect(JSON.parse(calls[0].body!)).toEqual({ type: "event", data: event, mappedUrn });
+});
+
+test("an explicit URN wins over the transformer output's", async () => {
+  const { ctx, calls } = mockCtx([{ body: { status: "ok", data: {} } }, { body: { status: "ok", data: {} } }]);
+  const other = "urn:1:co_1:conn_eb:/events/999";
+  await action.execute({ type: "event", data: { type: "event", urn: mappedUrn, data: {} }, mappedUrn: other }, ctx);
+  expect(JSON.parse(calls[0].body!)).toEqual({ type: "event", data: {}, mappedUrn: other });
+  await action.execute({ type: "event", data: { type: "event", urn: mappedUrn, data: {} }, urn }, ctx);
+  expect(JSON.parse(calls[1].body!)).toEqual({ type: "event", data: {}, urn });
+});
+
+test("without a URN, uses the object's own: remote → mapped URN, ours → Cohost URN, an order body's order.urn", async () => {
+  const { ctx, calls } = mockCtx([1, 2, 3].map(() => ({ body: { status: "ok", data: {} } })));
+  await action.execute({ type: "event", data: { urn: mappedUrn } }, ctx);
+  expect(JSON.parse(calls[0].body!)).toMatchObject({ mappedUrn });
+  await action.execute({ type: "event", data: { urn } }, ctx);
+  expect(JSON.parse(calls[1].body!)).toEqual({ type: "event", data: { urn }, urn });
+  const orderUrn = "urn:1:co_1:conn_eb:/orders/9";
+  await action.execute({ type: "order", data: { order: { urn: orderUrn }, source: {} } }, ctx);
+  expect(JSON.parse(calls[2].body!)).toMatchObject({ type: "order", mappedUrn: orderUrn });
 });
 
 test("sends our URN alone when given", async () => {
@@ -34,6 +61,7 @@ test.each([
   { type: "event", data: null, urn },
   { type: "event", data: {} },
   { type: "event", data: {}, mappedUrn: "" },
+  { type: "event", data: { urn: "" } },
   { type: "event", data: {}, mappedUrn: { urn: mappedUrn } },
   { type: "event", data: {}, mappedUrn, mappedUrnLabels: [] },
   { type: "event", data: {}, mappedUrn, mappedUrnLabels: "x" },

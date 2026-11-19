@@ -83,6 +83,12 @@ export interface EbAttendee {
   ticket_class_id?: string;
   ticket_class_name?: string;
   quantity?: number;
+  /** e.g. `Attending`, `Checked In`, `Not Attending`. */
+  status?: string;
+  checked_in?: boolean;
+  cancelled?: boolean;
+  refunded?: boolean;
+  barcodes?: { barcode?: string; status?: string; [k: string]: unknown }[];
   profile?: { name?: string; first_name?: string; last_name?: string; email?: string; cell_phone?: string };
   costs?: {
     base_price?: EbCurrency;
@@ -104,6 +110,9 @@ export interface EbOrder {
   email?: string;
   status?: string;
   event_id?: string;
+  /** Present on some responses; otherwise on the expanded `event`. */
+  organization_id?: string | number;
+  event?: { id?: string; organization_id?: string | number; [k: string]: unknown };
   currency?: string;
   costs?: {
     base_price?: EbCurrency;
@@ -111,6 +120,8 @@ export interface EbOrder {
     eventbrite_fee?: EbCurrency;
     payment_fee?: EbCurrency;
     tax?: EbCurrency;
+    /** Tax on Eventbrite's fees (e.g. `eventbrite.gts.tax`), reported apart from `eventbrite_fee`. */
+    display_tax?: { name?: string; tax?: EbCurrency };
   };
   attendees?: EbAttendee[];
   [k: string]: unknown;
@@ -253,6 +264,9 @@ export interface CohostTicket {
 
 export interface CohostCustomer {
   name: string;
+  /** Cohost's own name fields (`first` / `last`); `firstName` / `lastName` are kept for older readers. */
+  first?: string;
+  last?: string;
   firstName?: string;
   lastName?: string;
   email?: string | null;
@@ -299,6 +313,11 @@ export interface CohostOrder {
   urn?: string;
   /** The URN of the event it belongs to (from Eventbrite's `event_id`). */
   event_urn?: string;
+  /**
+   * The order's event for `POST /v1/orders`: the same event URN, which the server resolves
+   * through its mapping. (`/v1/rms/sync` builds the context from `event_urn` instead.)
+   */
+  contextId?: string;
   id?: string;
   orderNumber?: string;
   status: CohostOrderStatus;
@@ -311,4 +330,58 @@ export interface CohostOrder {
   source?: string;
   sourceId?: string;
   [k: string]: unknown;
+}
+
+/**
+ * The `source` block of `POST /v1/orders` (Cohost's `orderSourceInputSchema`): the external
+ * system of record for the order. `account`, `connectionId` and `app` are left to the server,
+ * which takes them from the connection token.
+ */
+export interface CohostOrderSource {
+  system: "eventbrite";
+  /** The Eventbrite organization the order belongs to, when the order carries it. */
+  account?: string;
+  /** Eventbrite order id, raw, no prefix. */
+  externalId: string;
+  eventId?: string | null;
+  /** The order's source URN (the same as `order.urn`). */
+  urn?: string | null;
+  /** Eventbrite's own last-modified time (ISO-8601). */
+  changedAt?: string | null;
+  /** Eventbrite's own order status, before mapping. */
+  status?: string | null;
+  /** The raw Eventbrite order, stored for support. */
+  payload?: unknown;
+}
+
+/** One ticket holder, as `POST /v1/orders` takes it in its top-level `attendees`. */
+export interface CohostOrderAttendee {
+  /** The order item the attendee belongs to (the Eventbrite attendee id). */
+  orderItemId: string;
+  /** Position within the item's quantity. */
+  index: number;
+  /** The attendee's source URN. */
+  urn?: string;
+  /** The ticket holder; `null` when Eventbrite has no holder details (Cohost then uses the buyer). */
+  profile: {
+    name: string;
+    displayName?: string;
+    first?: string;
+    last?: string;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
+  barcodes: string[];
+  checkedIn: boolean;
+  status: "attending" | "checkedIn" | "cancelled" | "refunded" | "unknown";
+}
+
+/**
+ * A converted order: the body of `POST /v1/orders` (`{ order, source, attendees? }`), so a
+ * step can submit `data` as is. `attendees` is present only when the conversion is enriched.
+ */
+export interface CohostOrderPayload {
+  order: CohostOrder;
+  source: CohostOrderSource;
+  attendees?: CohostOrderAttendee[];
 }

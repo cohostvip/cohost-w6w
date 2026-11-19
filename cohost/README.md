@@ -147,6 +147,15 @@ trigger's declared envelope identical.
 | `get-order` | `GET /orders/{id}` |
 | `list-order-attendees` | `GET /orders/{id}/attendees` |
 | `send-order-confirmation` | `POST /orders/{id}/send-confirmation` |
+| `upsert-order` | `POST /orders` |
+
+**Upsert Order** (`upsert-order`) inserts or updates an order by `order.urn`. Its one
+param, **Order Data**, is the request body as is — `{ order, source?, attendees?, context? }`,
+which is exactly the Eventbrite → Cohost transformer's `data`. `order.contextId` may be the
+event's remote URN (Cohost resolves it through the event's mapping); `attendees` (ticket
+holders bound by `orderItemId`) become the order's attendees, with their own names and
+barcodes. `order.urn` is required so a retried step updates instead of duplicating. Returns
+`{ order, meta }` (`meta.action` is `create` or `update`).
 
 ### Coupons (`resource: coupon`)
 
@@ -200,7 +209,10 @@ deduplicated. Lookups work from either endpoint.
 no router, no separate lookup. It calls `POST /rms/sync` with:
 
 - **Type** — `event`/`ticket`/`order` (a transformer's `type`).
-- **Data** — the object (a transformer's `data`), optionally with `event_urn`.
+- **Data** — the object (a transformer's `data`), optionally with `event_urn`. A
+  transformer's whole output (`{ type, urn, data }`) also works as is: it is unwrapped,
+  its `type` is used, and its `urn` becomes the Mapped URN. With no URN set, the
+  object's own `urn` (`order.urn` for an order body) is used.
 - **Mapped URN** — the remote URN (a transformer's `urn`). Cohost looks up the
   object it is mapped to and updates it; if it is not mapped yet, the object is
   inserted and the mapping recorded.
@@ -223,7 +235,10 @@ synced from) names its event: a ticket is placed under it, and the order's conte
 mapped, or one whose remote parent event is mapped, finds its event without it. An
 event's `data.tickets` are saved with the event. It returns
 `{ type, urn, mappedUrn, mappedUrnLabels, id, data, meta }`: our URN, the saved object,
-and `meta.action` (`create`/`update`) with the changed fields.
+and `meta.action` (`create`/`update`) with the changed fields. A payload identical to the
+last one synced to the object is not written again: it returns `meta.action: "unchanged"`
+(`changed: []`) with the object as it is now in `data`. Sync only inserts or updates; it
+never deletes.
 
 For example, `{"purpose":"sync"}` matches a mapped resource whose labels include
 `{"source":"eventbrite","purpose":"sync","category":"ticket"}`. Multiple filter

@@ -31,6 +31,7 @@ const createCoupon: ActionDefinition<Input> = {
       label: "Discount Type",
       type: "select",
       required: true,
+      default: "percentage",
       options: [
         { value: "percentage", label: "Percentage" },
         { value: "fixed", label: "Fixed amount" },

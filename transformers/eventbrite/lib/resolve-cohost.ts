@@ -73,10 +73,16 @@ function mapObject(value: JsonObject, kind: Kind, fallbackCurrency: string, path
   }
 }
 
-/** Eventbrite → Cohost emits `{ type, urn, data }`; accept it as-is so results round-trip. */
+/**
+ * Eventbrite → Cohost emits `{ type, urn, data }`, and an order's `data` is the upsert body
+ * `{ order, source, attendees? }`; accept both as-is so results round-trip.
+ */
 function unwrap(value: unknown): unknown {
-  return isObject(value) && typeof value.urn === "string" && isObject(value.data) &&
-    (value.type === "event" || value.type === "ticket" || value.type === "order") ? value.data : value;
+  if (isObject(value) && typeof value.urn === "string" && isObject(value.data) &&
+      (value.type === "event" || value.type === "ticket" || value.type === "order")) {
+    value = value.data;
+  }
+  return isObject(value) && isObject(value.order) && !("customer" in value) && !("items" in value) ? value.order : value;
 }
 
 function resolveObject(value: unknown, currency: string, path: string, expected: Kind): EbObject {

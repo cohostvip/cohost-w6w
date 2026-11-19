@@ -64,16 +64,18 @@ test("free tickets and event fallback currency are supported", () => {
 });
 
 test("orders convert items to attendees while preserving quantities and mapped totals", () => {
-  const order = (eventbriteToCohost(createEventbriteOrdersFixture({ type: "expanded_order", orderIndex: 4 }), context) as Converted<"order">).data;
-  const original = structuredClone(order);
-  const result = cohostToEventbrite(order) as EbOrder;
+  const payload = (eventbriteToCohost(createEventbriteOrdersFixture({ type: "expanded_order", orderIndex: 4 }), context) as Converted<"order">).data;
+  const { order } = payload;
+  const original = structuredClone(payload);
+  const result = cohostToEventbrite(payload) as EbOrder;
+  expect(cohostToEventbrite(order)).toEqual(result);
   expect(result.id).toBe(order.sourceId);
   expect(result.email).toBe(order.customer.email);
   expect(result.attendees).toHaveLength(4);
   expect(result.attendees?.[0]).toMatchObject({ id: order.items[0].id, ticket_class_id: order.items[0].offeringId, quantity: 1 });
   expect(result.costs?.gross?.value).toBe(Number(order.costs.total.split(",")[1]));
   expect(result.costs?.payment_fee?.value).toBe(0);
-  expect(order).toEqual(original);
+  expect(payload).toEqual(original);
 });
 
 test("named listings round-trip every event, ticket, and order", () => {

@@ -12,7 +12,7 @@ test("detects shapes independently of resource URLs and ID naming conventions", 
   expect(eventbriteToCohost({ id: "123", name: { text: "Festival" } }, context)).toMatchObject({ type: "event", data: { name: "Festival", tz: "UTC" } });
   expect(eventbriteToCohost({ id: "123", event_id: "event-1", name: "Free entry", free: true }, context, "EUR")).toMatchObject({ type: "ticket", data: { costs: { cost: "EUR,0" } } });
   expect(eventbriteToCohost({ id: "123", email: "buyer@example.com", status: "placed" }, context)).toMatchObject({
-    type: "order", data: { customer: { email: "buyer@example.com" }, items: [] },
+    type: "order", data: { order: { customer: { email: "buyer@example.com" }, items: [] } },
   });
 });
 
@@ -51,7 +51,7 @@ test("absent and null expansions stay absent, while empty expansions stay empty"
 test("expanded order maps each attendee to its own Cohost line item", () => {
   const input = createEventbriteOrdersFixture({ type: "expanded_order", orderIndex: 4 });
   const original = structuredClone(input);
-  const result = (eventbriteToCohost(input, context) as Converted<"order">).data;
+  const result = (eventbriteToCohost(input, context) as Converted<"order">).data.order;
   expect(result.orderNumber).toBe(input.id);
   expect(result.customer.email).toBe(input.email);
   expect(result.items.map(item => item.id)).toEqual(input.attendees.map(attendee => attendee.id));
@@ -60,7 +60,7 @@ test("expanded order maps each attendee to its own Cohost line item", () => {
   expect(result.items[0].costs.cost).toBe(`USD,${input.attendees[0].costs.base_price.value}`);
   expect(result).not.toHaveProperty("attendees");
   expect(input).toEqual(original);
-  expect(eventbriteToCohost(createEventbriteOrdersFixture({ type: "order" }), context)).toHaveProperty("data.items", []);
+  expect(eventbriteToCohost(createEventbriteOrdersFixture({ type: "order" }), context)).toHaveProperty("data.order.items", []);
 });
 
 test("event listings map expanded children and preserve pagination independently", () => {
@@ -82,8 +82,8 @@ test("ticket and order listings map every object", () => {
 
   const orders = createEventbriteOrdersFixture();
   const orderResult = eventbriteToCohost(orders, context) as { orders: Converted<"order">[]; pagination: unknown };
-  expect(orderResult.orders.map(order => order.data.sourceId)).toEqual(orders.orders.map(order => order.id));
-  expect(orderResult.orders[4].data.items).toHaveLength(4);
+  expect(orderResult.orders.map(order => order.data.order.sourceId)).toEqual(orders.orders.map(order => order.id));
+  expect(orderResult.orders[4].data.order.items).toHaveLength(4);
   expect(orderResult.pagination).toEqual(orders.pagination);
 });
 
@@ -96,7 +96,7 @@ test("arrays can mix recognized object families and can be empty", () => {
   expect(result).toEqual([
     { type: "event", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ name: "Example Community Festival", tz: "America/New_York" }) },
     { type: "ticket", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ costs: expect.objectContaining({ cost: "USD,2500" }) }) },
-    { type: "order", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ orderNumber: "6000000000001" }) },
+    { type: "order", urn: expect.stringMatching(/^urn:1:/), data: expect.objectContaining({ order: expect.objectContaining({ orderNumber: "6000000000001" }) }) },
   ]);
   expect(eventbriteToCohost([], context)).toEqual([]);
   expect(eventbriteToCohost({ events: [] }, context)).toEqual({ events: [] });
@@ -135,9 +135,9 @@ test("tickets and orders carry their event as event_urn instead of event_id", ()
   expect(ticket.data).not.toHaveProperty("event_id");
 
   const order = eventbriteToCohost({ id: "o1", event_id: "e1", email: "a@b.co", status: "placed" }, context) as Converted<"order">;
-  expect(order.data.event_urn).toBe(eventUrn("e1"));
-  expect(order.data).not.toHaveProperty("event_id");
-  expect(eventbriteToCohost({ id: "o1", email: "a@b.co", status: "placed" }, context)).not.toHaveProperty("data.event_urn");
+  expect(order.data.order.event_urn).toBe(eventUrn("e1"));
+  expect(order.data.order).not.toHaveProperty("event_id");
+  expect(eventbriteToCohost({ id: "o1", email: "a@b.co", status: "placed" }, context)).not.toHaveProperty("data.order.event_urn");
   expect(() => eventbriteToCohost({ id: "o1", event_id: "", email: "a@b.co" }, context)).toThrow(/data\.event_id/);
 
   const event = eventbriteToCohost({ id: "e1", name: { text: "Fest" }, ticket_classes: [{ id: "t1", name: "GA", free: true }] }, context) as Converted<"event">;
@@ -147,7 +147,64 @@ test("tickets and orders carry their event as event_urn instead of event_id", ()
 test("order items reference their ticket's URN when the order names its event", () => {
   const attendees = [{ ticket_class_id: "tc1", quantity: 2 }, { quantity: 1 }];
   const order = eventbriteToCohost({ id: "o1", event_id: "e1", email: "a@b.co", status: "placed", attendees }, context) as Converted<"order">;
-  expect(order.data.items.map(item => item.offeringId)).toEqual([generateUrn("/events/e1/ticket_classes/tc1", context), "unknown"]);
+  expect(order.data.order.items.map(item => item.offeringId)).toEqual([generateUrn("/events/e1/ticket_classes/tc1", context), "unknown"]);
   const unscoped = eventbriteToCohost({ id: "o1", email: "a@b.co", status: "placed", attendees }, context) as Converted<"order">;
-  expect(unscoped.data.items.map(item => item.offeringId)).toEqual(["tc1", "unknown"]);
+  expect(unscoped.data.order.items.map(item => item.offeringId)).toEqual(["tc1", "unknown"]);
+});
+
+test("an order converts to the upsert body: the order, its source, and contextId = the event URN", () => {
+  const input = createEventbriteOrdersFixture({ type: "expanded_order", orderIndex: 4 });
+  const { urn, data } = eventbriteToCohost(input, context) as Converted<"order">;
+  expect(Object.keys(data).sort()).toEqual(["order", "source"]);
+  expect(data.order.urn).toBe(urn);
+  expect(data.order.contextId).toBe(generateUrn(`/events/${input.event_id}`, context));
+  expect(data.order.contextId).toBe(data.order.event_urn);
+  expect(data.order.customer).toMatchObject({ first: input.first_name, last: input.last_name });
+  expect(data.source).toEqual({
+    system: "eventbrite",
+    externalId: input.id,
+    eventId: input.event_id,
+    urn,
+    changedAt: input.changed,
+    status: input.status,
+    payload: input,
+  });
+});
+
+test("enrich adds one attendee per Eventbrite attendee, bound to its item, with profile, barcodes and status", () => {
+  const input = createEventbriteOrdersFixture({ type: "expanded_order", orderIndex: 4 });
+  const original = structuredClone(input);
+  const { data } = eventbriteToCohost(input, context, "USD", { enrich: true }) as Converted<"order">;
+  expect(data.attendees).toHaveLength(input.attendees.length);
+  expect(data.attendees!.map(a => a.orderItemId)).toEqual(data.order.items.map(item => item.id));
+  const [first] = input.attendees;
+  expect(data.attendees![0]).toEqual({
+    orderItemId: first.id,
+    index: 0,
+    urn: generateUrn(`/events/${input.event_id}/attendees/${first.id}`, context),
+    profile: expect.objectContaining({ email: first.profile.email, first: first.profile.first_name, last: first.profile.last_name }),
+    barcodes: first.barcodes.map(b => b.barcode),
+    checkedIn: false,
+    status: "attending",
+  });
+  expect(input).toEqual(original);
+});
+
+test("enriched attendee status: refunded > cancelled > checked in > attending", () => {
+  const order = (attendees: object[]) =>
+    (eventbriteToCohost({ id: "o1", email: "a@b.co", status: "placed", attendees }, context, "USD", { enrich: true }) as Converted<"order">).data;
+  const statuses = order([
+    { id: "a1", status: "Attending", refunded: true, cancelled: true, checked_in: true },
+    { id: "a2", status: "Attending", cancelled: true, checked_in: true },
+    { id: "a3", status: "Checked In", checked_in: true },
+    { id: "a4", status: "Attending" },
+    { id: "a5", status: "Not Attending" },
+  ]).attendees!.map(a => a.status);
+  expect(statuses).toEqual(["refunded", "cancelled", "checkedIn", "attending", "unknown"]);
+
+  const bare = order([{ id: "a1" }, { ticket_class_id: "tc1" }]);
+  // No event → the attendee URN hangs off the order; an attendee without an id has no item to bind to.
+  expect(bare.attendees).toEqual([
+    { orderItemId: "a1", index: 0, urn: generateUrn("/orders/o1/attendees/a1", context), profile: null, barcodes: [], checkedIn: false, status: "unknown" },
+  ]);
 });
