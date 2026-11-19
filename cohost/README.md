@@ -36,7 +36,8 @@ cohost/
 │   ├── event-changed.ts                  # fires on `event.*`
 │   ├── ticket-changed.ts                 # fires on `offering.*`
 │   ├── attendee-changed.ts               # fires on `attendee.*` (one per attendee an order creates)
-│   └── object-changed.ts                 # general: any picked type × action
+│   ├── object-changed.ts                 # general: any picked type × action
+│   └── channel-event-changed.ts          # fires on `channelEvent.*` (one per channel listing)
 └── lib/
     ├── client.ts            # thin ctx.fetch wrapper over api.cohost.vip
     ├── params.ts            # shared param / output fragments (pagination, resources)
@@ -67,6 +68,19 @@ cohost/
 - **Object Changed** — the general trigger. Pick the types (event, ticket/offering,
   order, attendee) and actions (created, updated, deleted by default; also published,
   placed, refunded, checked in); it subscribes to every combination Cohost emits.
+- **Channel Event Changed** — fires on `channelEvent.listed` / `changed` / `unlisted`
+  for the **channel owner**: an event is listed on one of your sales channels, its
+  listing changed (the event, any of its tickets — prices included — or the organizer's
+  channel customization), or it was unlisted (removed, hidden, cancelled or back to
+  draft). One delivery per listing — `meta.channelId` + `meta.listingId` say which —
+  and `data` is the listing exactly as the channel shows it (`GET /events/{id}?listingId=…`
+  with the channel header: channel name, description and prices); `null` once unlisted.
+  Optional `channelId` narrows it to one channel. Built for mirroring a channel's
+  events to another marketplace (an internal "publish to Eventbrite" channel).
+  `meta.properties` carries the values the channel keeps on the listing — the
+  properties it declares in its settings, e.g. an `eventbriteId` — so a run knows
+  whether to create or update the copy elsewhere (on `unlisted`, the values the
+  listing had). Write them back with `set-channel-listing-properties`.
 
 `*.changed` events are never subscribed by the change triggers: Cohost fires one with
 every `*.updated`, so they would deliver each update twice.
@@ -177,6 +191,19 @@ Reads are list-only — the API has no `GET /coupons/{id}`.
 | `create-organizer` | `POST /organizers` |
 | `update-organizer` | `PATCH /organizers/{id}` |
 | `delete-organizer` | `DELETE /organizers/{id}` |
+
+### Sales channels (`resource: channel`)
+
+| Key | Endpoint |
+| --- | --- |
+| `set-channel-listing-properties` | `PATCH /company/sales-channels/{id}/events/{eventId}/listings/{listingId}/properties` |
+
+Sets the values your channel keeps on one listing of an event (`listingId` defaults to
+`primary`). Keys must be properties the channel declares in its settings, each value of its
+declared type; `null` clears one, keys left out keep theirs. The next **Channel Event
+Changed** for the listing carries them in `meta.properties`, and the write itself does not
+fire that trigger — a publish-to-Eventbrite workflow can store the id it created without
+re-triggering itself.
 
 ### Users (`resource: user`)
 

@@ -518,6 +518,37 @@ export const ATTENDEE_CHANGED_SAMPLE = payloadSample(
 );
 
 /**
+ * Channel Event Changed: `data` is one listing of the event as the channel shows it (its channel
+ * name, description and prices); `meta` names the channel and the listing.
+ */
+export const CHANNEL_EVENT_CHANGED_OUTPUT: OutputField[] = [
+  ...payloadOutput("The event as the channel shows this listing", [
+    ...EVENT_OUTPUT,
+    a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)"),
+  ]).map((f) =>
+    f.key === "type"
+      ? { ...f, label: "Type (channelEvent)" }
+      : f.key === "meta.changedFields"
+      ? { ...f, label: "Changed fields (e.g. event.name, tickets.<id>.costs, customization)" }
+      : f
+  ),
+  s("meta.channelId", "Channel ID"),
+  s("meta.listingId", "Listing ID (primary, or an extra listing's id)"),
+  o("meta.properties", "Listing properties (values your channel keeps on this listing, e.g. a synced id)"),
+];
+export const CHANNEL_EVENT_CHANGED_SAMPLE = {
+  ...payloadSample(
+    "channelEvent.changed",
+    `/channels/ch_sample/events/${ID.event}/listings/primary`,
+    { ...EVENT_SAMPLE, name: "Friday Night Social — on Sample Channel", ticketPrices: ["USD,5500"] },
+    ["tickets.SampleTicket01.costs"],
+    { channelId: "ch_sample", listingId: "primary", properties: { eventbriteId: "1234567890" } },
+  ),
+  type: "channelEvent",
+  id: ID.event,
+};
+
+/**
  * Object Changed fires for any type, so its `data` is whichever object changed — only `id` is
  * common to all; the rest matches the type's `get-*` action.
  */

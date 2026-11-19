@@ -8,6 +8,7 @@ import eventChanged from "./triggers/event-changed.ts";
 import ticketChanged from "./triggers/ticket-changed.ts";
 import attendeeChanged from "./triggers/attendee-changed.ts";
 import objectChanged from "./triggers/object-changed.ts";
+import channelEventChanged from "./triggers/channel-event-changed.ts";
 
 // Events
 import listEvents from "./actions/list-events.ts";
@@ -24,6 +25,7 @@ import listEventTickets from "./actions/list-event-tickets.ts";
 import getEventTicket from "./actions/get-event-ticket.ts";
 import createEventTickets from "./actions/create-event-tickets.ts";
 import updateEventTicket from "./actions/update-event-ticket.ts";
+import setChannelListingProperties from "./actions/set-channel-listing-properties.ts";
 import deleteEventTicket from "./actions/delete-event-ticket.ts";
 
 // Orders
@@ -146,6 +148,8 @@ export default {
     createOrganizer,
     updateOrganizer,
     deleteOrganizer,
+    // sales channels
+    setChannelListingProperties,
     // users
     getMe,
     getUser,
@@ -159,6 +163,15 @@ export default {
     friendlyValue,
     friendlyData,
   ].map(withFriendlyOutput),
-  triggers: [orderPlaced, orderChanged, orderConfirmationRequested, eventChanged, ticketChanged, attendeeChanged, objectChanged],
+  triggers: [
+    orderPlaced,
+    orderChanged,
+    orderConfirmationRequested,
+    eventChanged,
+    ticketChanged,
+    attendeeChanged,
+    objectChanged,
+    channelEventChanged,
+  ],
   auth: [tenant, apiToken],
 } satisfies AppDefinition;

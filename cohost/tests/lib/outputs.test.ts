@@ -52,10 +52,18 @@ test("every trigger sample matches its declared output, both ways", () => {
     const declared = declaredShape(trigger.output as OutputField[]);
     const observed = shapeOf(trigger.sample);
     const isLeafArray = (key: string) => declared[key] === "array" && declared[`${key}.0`] === undefined;
+    // An object declared with no fields is an open map (a channel listing's `meta.properties`:
+    // each channel names its own keys), so the sample's example keys under it are not declared.
+    const openMaps = Object.keys(declared).filter(
+      (k) => declared[k] === "object" && !Object.keys(declared).some((d) => d.startsWith(`${k}.`)),
+    );
+    const inOpenMap = (key: string) => openMaps.some((m) => key.startsWith(`${m}.`));
 
     const missing = Object.keys(declared).filter((k) => !(k in observed));
     // Elements of an un-itemized array (`tags`, `changedFields`) are not declared, by design.
-    const extra = Object.keys(observed).filter((k) => !(k in declared) && !isLeafArray(k.split(".0")[0]));
+    const extra = Object.keys(observed).filter(
+      (k) => !(k in declared) && !isLeafArray(k.split(".0")[0]) && !inOpenMap(k),
+    );
     const mismatched = Object.keys(declared).filter(
       (k) => k in observed && observed[k] !== "null" && observed[k] !== declared[k],
     );
@@ -73,7 +81,12 @@ test("every trigger declares the same envelope: urn, action, type, id, timestamp
   const envelope = (t: (typeof app.triggers)[number]) =>
     (t.output as OutputField[])
       .map((f) => f.key)
-      .filter((k) => !k.startsWith("data.") && k !== "meta.transactions")
+      // Per-trigger meta extras: an order's payments, a channel listing's channel, listing + properties.
+      .filter(
+        (k) =>
+          !k.startsWith("data.") &&
+          !["meta.transactions", "meta.channelId", "meta.listingId", "meta.properties"].includes(k),
+      )
       .sort();
   const [first, ...rest] = app.triggers;
   expect(envelope(first)).toEqual(
