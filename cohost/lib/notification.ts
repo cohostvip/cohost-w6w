@@ -9,7 +9,11 @@ export interface WebhookPing {
   timestamp: string;
   urn: string;
   context: { companyId: string; service: string; resourcePath: string };
-  data?: { changedFields?: string[] };
+  data?: {
+    changedFields?: string[];
+    /** `channelEvent.*` only: the values the channel keeps on the listing (e.g. a synced id). */
+    properties?: Record<string, string | number | boolean>;
+  };
 }
 
 /** The ping in a `handleIngest` `raw`: w6w hands the hook the whole inbound call, body included. */
