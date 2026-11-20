@@ -14,12 +14,16 @@ test("action keys are unique", () => {
 
 test("one action per backend-ops SDK endpoint", () => {
   // The `format` actions are local conversions and the `urn` actions read private
-  // endpoints — neither is an SDK endpoint. 31 = the 28 catalogued endpoints plus three
-  // public ones not yet wrapped by the Node SDK: `get-event-attendee`
-  // (`GET /events/{id}/attendees/{attendeeId}`), `upsert-order` (`POST /orders`) and
-  // `set-channel-listing-properties`
-  // (`PATCH /company/sales-channels/{id}/events/{eventId}/listings/{listingId}/properties`).
-  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(31);
+  // endpoints — neither is an SDK endpoint. 48 = the 28 catalogued endpoints plus 20 public
+  // ones not yet wrapped by the Node SDK: `get-event-attendee`
+  // (`GET /events/{id}/attendees/{attendeeId}`), `upsert-order` (`POST /orders`), and the 12
+  // sales-channel actions (`resource: channel`) — channel CRUD and its events, listings and
+  // properties under `/company/sales-channels`, plus the channel views `get-channel-event`
+  // (`GET /events/{id}` + `/tickets`) and `list-channel-event-tickets` (`GET /events/{id}/tickets`),
+  // both with `x-cohost-channel-id`; and the 6 price-formula actions (`resource: price-formula`) —
+  // formula CRUD under `/company/price-formulas`, plus `assign-price-formula` (the event's channel
+  // customization, `GET`+`PUT /events/{id}/channels/{channelId}/customization`).
+  expect(app.actions.filter((a) => a.resource !== "format" && a.resource !== "urn")).toHaveLength(48);
 });
 
 test("every fetch action takes a friendly flag, off by default", () => {

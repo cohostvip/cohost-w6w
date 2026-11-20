@@ -517,15 +517,101 @@ export const ATTENDEE_CHANGED_SAMPLE = payloadSample(
   [],
 );
 
+// ---- sales channel --------------------------------------------------------------------------
+
+/** A sales channel the company owns, as `GET /company/sales-channels/{id}` returns it. */
+export const CHANNEL_OUTPUT: OutputField[] = [
+  s("id", "Channel ID"),
+  s("name", "Name"),
+  s("description", "Description"),
+  s("type", "Type (website, social, promoter, affiliate, api, seller, other)"),
+  s("status", "Status (active, inactive)"),
+  b("isPublic", "Public in the marketplace"),
+  s("code", "Attribution code"),
+  a("tags", "Tags"),
+  o("listingOptions", "Listing options (description formats, fees, extra listings, properties)"),
+  o("pricing", "Default pricing for your own events' listings that set none"),
+  s("pricing.formulaId", "Default price formula ID"),
+  n("pricing.markupPercent", "Default markup %"),
+  s("logo.url", "Logo (marketplace branding)"),
+  s("brandColor", "Brand color (marketplace branding)"),
+  s("companyId", "Company ID"),
+  s("created", "Created (UTC)"),
+  s("changed", "Changed (UTC)"),
+];
+
+/** One event listed on a channel, as `GET /company/sales-channels/{id}/events` returns it. */
+export const CHANNEL_LISTED_EVENT_OUTPUT: OutputField[] = [
+  s("id", "Event ID"),
+  s("slug", "Slug"),
+  s("name", "Name"),
+  s("start", "Start (ISO)"),
+  s("end", "End (ISO)"),
+  s("tz", "Timezone"),
+  s("status", "Event status"),
+  s("flyer.url", "Flyer URL"),
+  o("location", "Location"),
+  s("listing.visibility", "Visibility on the channel (visible, hidden)"),
+  a("listing.tags", "Listing tags"),
+  o("listing.meta", "Listing meta"),
+  n("listing.priority", "Listing priority"),
+  b("listing.orphaned", "Orphaned (the event is no longer live, so the channel does not show it)"),
+];
+
+/** One listing of an event on a channel, with the values the channel keeps on it. */
+export const CHANNEL_LISTING_OUTPUT: OutputField[] = [
+  s("eventId", "Event ID"),
+  s("channelId", "Channel ID"),
+  s("listingId", "Listing ID (primary, or an extra listing's id)"),
+  s("slug", "Listing slug"),
+  o("properties", "Listing properties"),
+];
+
+/**
+ * One listing of an event as a sales channel shows it — `GET /events/{id}` with the channel
+ * header: the channel's name and description for it, and its prices on the channel.
+ */
+export const CHANNEL_EVENT_OUTPUT: OutputField[] = [
+  ...EVENT_OUTPUT,
+  o("description", "Description on the channel"),
+  s("description.html", "Description on the channel (HTML)"),
+  a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)"),
+  b("salesEnabled", "Ticket sales on (false while the organizer has paused them on the channel)"),
+];
+export const CHANNEL_EVENT_SAMPLE = {
+  ...EVENT_SAMPLE,
+  name: "Friday Night Social — on Sample Channel",
+  description: { html: "<p>Live DJs, a welcome drink and a packed room.</p>" },
+  ticketPrices: ["USD,5500"],
+  salesEnabled: true,
+};
+
+/**
+ * One ticket as a sales channel sells it — `GET /events/{id}/tickets` with the channel header:
+ * the channel's price with its fees recomputed, `status` `unavailable` while the organizer has
+ * paused sales on the channel, and no owner-only stock figures (capacity, quantity sold).
+ */
+export const CHANNEL_TICKET_OUTPUT: OutputField[] = TICKET_OUTPUT.filter(
+  (f) => f.key !== "capacity" && f.key !== "quantitySold",
+).map((f) =>
+  f.key === "status"
+    ? { ...f, label: "Status (live, sold-out; unavailable while sales on the channel are paused)" }
+    : f.key === "costs.cost"
+    ? { ...f, label: `Price on the channel ${COSTS_HINT}` }
+    : f
+);
+const { capacity: _capacity, quantitySold: _sold, ...CHANNEL_TICKET_SAMPLE_BASE } = TICKET_SAMPLE;
+export const CHANNEL_TICKET_SAMPLE = {
+  ...CHANNEL_TICKET_SAMPLE_BASE,
+  costs: { ...TICKET_SAMPLE.costs, cost: "USD,2750", gross: "USD,3025", total: "USD,3025" },
+};
+
 /**
  * Channel Event Changed: `data` is one listing of the event as the channel shows it (its channel
  * name, description and prices); `meta` names the channel and the listing.
  */
 export const CHANNEL_EVENT_CHANGED_OUTPUT: OutputField[] = [
-  ...payloadOutput("The event as the channel shows this listing", [
-    ...EVENT_OUTPUT,
-    a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)"),
-  ]).map((f) =>
+  ...payloadOutput("The event as the channel shows this listing", CHANNEL_EVENT_OUTPUT).map((f) =>
     f.key === "type"
       ? { ...f, label: "Type (channelEvent)" }
       : f.key === "meta.changedFields"
@@ -540,7 +626,7 @@ export const CHANNEL_EVENT_CHANGED_SAMPLE = {
   ...payloadSample(
     "channelEvent.changed",
     `/channels/ch_sample/events/${ID.event}/listings/primary`,
-    { ...EVENT_SAMPLE, name: "Friday Night Social — on Sample Channel", ticketPrices: ["USD,5500"] },
+    CHANNEL_EVENT_SAMPLE,
     ["tickets.SampleTicket01.costs"],
     { channelId: "ch_sample", listingId: "primary", properties: { eventbriteId: "1234567890" } },
   ),
