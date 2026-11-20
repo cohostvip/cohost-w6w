@@ -1,4 +1,4 @@
-import { CohostClient } from "../lib/client.ts";
+import { fetchChannelEvent, isCohostNotFound } from "../lib/channel-event.ts";
 import {
   pickValues,
   pingOf,
@@ -107,13 +107,10 @@ const channelEventChanged: TriggerDefinition<Params, ChannelEventPayload, Subscr
     let data: unknown = null;
     if (ping.action !== "channelEvent.unlisted") {
       try {
-        data = await new CohostClient(ctx).request(`/events/${encodeURIComponent(listing.eventId)}`, {
-          query: { listingId: listing.listingId },
-          headers: { "x-cohost-channel-id": listing.channelId },
-        });
+        data = await fetchChannelEvent(ctx, listing);
       } catch (error) {
         // The channel no longer shows it (hidden or removed since): nothing to publish.
-        if (!(error instanceof Error && /^Cohost 404 /.test(error.message))) throw error;
+        if (!isCohostNotFound(error)) throw error;
       }
     }
 

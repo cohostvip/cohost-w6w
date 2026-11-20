@@ -26,6 +26,23 @@ import getEventTicket from "./actions/get-event-ticket.ts";
 import createEventTickets from "./actions/create-event-tickets.ts";
 import updateEventTicket from "./actions/update-event-ticket.ts";
 import setChannelListingProperties from "./actions/set-channel-listing-properties.ts";
+import assignPriceFormula from "./actions/assign-price-formula.ts";
+import createPriceFormula from "./actions/create-price-formula.ts";
+import deletePriceFormula from "./actions/delete-price-formula.ts";
+import getPriceFormula from "./actions/get-price-formula.ts";
+import listPriceFormulas from "./actions/list-price-formulas.ts";
+import updatePriceFormula from "./actions/update-price-formula.ts";
+import listChannels from "./actions/list-channels.ts";
+import getChannel from "./actions/get-channel.ts";
+import createChannel from "./actions/create-channel.ts";
+import updateChannel from "./actions/update-channel.ts";
+import deleteChannel from "./actions/delete-channel.ts";
+import listChannelEvents from "./actions/list-channel-events.ts";
+import listChannelEventListings from "./actions/list-channel-event-listings.ts";
+import setChannelEventVisibility from "./actions/set-channel-event-visibility.ts";
+import removeChannelEvent from "./actions/remove-channel-event.ts";
+import getChannelEvent from "./actions/get-channel-event.ts";
+import listChannelEventTickets from "./actions/list-channel-event-tickets.ts";
 import deleteEventTicket from "./actions/delete-event-ticket.ts";
 
 // Orders
@@ -149,7 +166,25 @@ export default {
     updateOrganizer,
     deleteOrganizer,
     // sales channels
+    listChannels,
+    getChannel,
+    createChannel,
+    updateChannel,
+    deleteChannel,
+    listChannelEvents,
+    getChannelEvent,
+    listChannelEventTickets,
+    listChannelEventListings,
+    setChannelEventVisibility,
+    removeChannelEvent,
     setChannelListingProperties,
+    // price formulas
+    listPriceFormulas,
+    getPriceFormula,
+    createPriceFormula,
+    updatePriceFormula,
+    deletePriceFormula,
+    assignPriceFormula,
     // users
     getMe,
     getUser,

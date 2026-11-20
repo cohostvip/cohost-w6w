@@ -74,7 +74,10 @@ cohost/
   channel customization), or it was unlisted (removed, hidden, cancelled or back to
   draft). One delivery per listing — `meta.channelId` + `meta.listingId` say which —
   and `data` is the listing exactly as the channel shows it (`GET /events/{id}?listingId=…`
-  with the channel header: channel name, description and prices); `null` once unlisted.
+  with the channel header: channel name, description, prices and `salesEnabled`); `null`
+  once unlisted. Pausing or resuming ticket sales on the channel fires it too, with
+  `changedFields` `customization`. Fetch the listing's tickets at channel prices with
+  `list-channel-event-tickets`.
   Optional `channelId` narrows it to one channel. Built for mirroring a channel's
   events to another marketplace (an internal "publish to Eventbrite" channel).
   `meta.properties` carries the values the channel keeps on the listing — the
@@ -196,14 +199,104 @@ Reads are list-only — the API has no `GET /coupons/{id}`.
 
 | Key | Endpoint |
 | --- | --- |
+| `list-channels` | `GET /company/sales-channels` |
+| `get-channel` | `GET /company/sales-channels/{id}` |
+| `create-channel` | `POST /company/sales-channels` |
+| `update-channel` | `PUT /company/sales-channels/{id}` |
+| `delete-channel` | `DELETE /company/sales-channels/{id}` |
+| `list-channel-events` | `GET /company/sales-channels/{id}/events` |
+| `list-channel-event-listings` | `GET /company/sales-channels/{id}/events/{eventId}/listings` |
+| `set-channel-event-visibility` | `PATCH /company/sales-channels/{id}/events/{eventId}/listing` |
+| `remove-channel-event` | `DELETE /company/sales-channels/{id}/events/{eventId}` |
+| `get-channel-event` | `GET /events/{id}` + `GET /events/{id}/tickets`, with `x-cohost-channel-id` |
+| `list-channel-event-tickets` | `GET /events/{id}/tickets`, with `x-cohost-channel-id` |
 | `set-channel-listing-properties` | `PATCH /company/sales-channels/{id}/events/{eventId}/listings/{listingId}/properties` |
 
-Sets the values your channel keeps on one listing of an event (`listingId` defaults to
+The channel actions manage the sales channels your company owns. Creating, updating or
+deleting a channel needs an admin, editor or owner role in the company.
+A channel can have a **default price**: a price formula (*Default price formula ID*) or a
+markup (*Default markup %*). It prices your own events' listings on the channel that set no
+formula or markup of their own. A listing's own formula or markup (even 0%) and a ticket's
+formula or set price still win. `update-channel` changes it with the same two fields, a
+markup of `0` or *Clear the default pricing* removes it, and each affected listing fires
+**Channel Event Changed** with `customization` in `changedFields`. The channel's outputs
+include `pricing`.
+Making a channel public (or asking to) needs its marketplace branding first: a `logo` and a
+`brandColor`. Without them Cohost refuses with `SALES_CHANNEL_BRANDING_REQUIRED`.
+`list-channel-events` pages through the events listed on a channel (`results` + `total`).
+Each event is its public profile plus its listing state on the channel: visibility, tags,
+meta and priority. Hidden listings are included; removed ones are not.
+`set-channel-event-visibility` hides an event on the channel without removing it, which
+fires **Channel Event Changed** as `unlisted`; showing it again fires `listed`.
+`remove-channel-event` takes the event off the channel and puts its application back to
+pending.
+
+`get-channel-event` fetches one listing of an event as your channel shows it. That is the
+channel's name and description for it, and `salesEnabled`, which is `false` while the
+organizer has paused ticket sales on the channel. It also returns `tickets`, each at its
+channel price (the organizer's flat price, price formula or markup, plus the channel's
+fees).
+`list-channel-event-tickets` returns just those tickets, as `results`. Both read live and
+sold-out tickets only, without the owner's capacity or sales figures, and each ticket's
+`status` reads `unavailable` while sales are paused. `listingId` defaults to `primary`.
+Both fail with a plain message when the channel does not show the listing: it is not listed
+there, it is hidden, or it is not live.
+
+`set-channel-listing-properties` sets the values your channel keeps on one listing of an event (`listingId` defaults to
 `primary`). Keys must be properties the channel declares in its settings, each value of its
 declared type; `null` clears one, keys left out keep theirs. The next **Channel Event
 Changed** for the listing carries them in `meta.properties`, and the write itself does not
 fire that trigger — a publish-to-Eventbrite workflow can store the id it created without
 re-triggering itself.
+
+### Price formulas (`resource: price-formula`)
+
+| Key | Endpoint |
+| --- | --- |
+| `list-price-formulas` | `GET /company/price-formulas` |
+| `get-price-formula` | `GET /company/price-formulas/{id}` |
+| `create-price-formula` | `POST /company/price-formulas` |
+| `update-price-formula` | `GET` + `PUT /company/price-formulas/{id}` |
+| `delete-price-formula` | `DELETE /company/price-formulas/{id}` |
+| `assign-price-formula` | `GET` + `PUT /events/{id}/channels/{channelId}/customization` |
+
+A price formula is a named pricing rule your company saves once, in the dashboard under
+Pricing → Formulas or with these actions. It is a markup percent, then a flat amount added,
+for example "Eventbrite VIP: 15% + $10". It can also cap what it adds to a ticket, either at an amount
+("25% + $10, at most $100": a $400 ticket gets $100 added, not $110) or at a percent of the price
+("10% + $10, at most 20%": a $50 ticket gets $10 added, not $15). The amount is added only to tickets priced in the
+formula's currency. You assign a formula to tickets on a channel listing. Changing the formula
+later reprices every ticket it is assigned to, across all events and channels, on the
+channel's pages and in new carts. Each of those listings then fires **Channel Event Changed**
+with `customization` in `changedFields`, so a publish-to-Eventbrite workflow can push the new
+prices.
+
+- `list-price-formulas` returns each formula with `usage`: the number of events, listings and
+  tickets that use it, and the number of channels whose default price it is.
+- `get-price-formula` adds `assignments`: for each listing, the event, channel and listing, and
+  the ticket ids the formula prices on it. It also adds `channels`, the channels whose default
+  price it is.
+- `create-price-formula` and `update-price-formula` take the amount in major units (`10` for
+  $10.00). For a cap, set `capType` (`amount` or `percent`) and `cap` (`100` for $100.00, in
+  the amount's currency, or `20` for 20%). `update-price-formula` keeps any field you leave
+  blank; `0` removes the markup or the amount, and `capType: none` removes the cap.
+- `delete-price-formula` is refused while any listing still uses the formula.
+- `assign-price-formula` prices the named tickets of an event on a channel by a formula
+  (`tickets`, comma or line separated). Any flat channel price those tickets had is dropped,
+  because a flat price wins over a formula. With no tickets named, it sets the formula for
+  the whole listing, which then prices every ticket that has neither its own price nor its own
+  formula. A blank `formulaId` removes the formula. The rest of the listing's customization is
+  kept.
+
+Creating, updating and deleting formulas needs an admin, editor or owner role in the company.
+Assigning one needs ownership of the event.
+
+A ticket's channel price follows this order of precedence:
+1. its own flat price;
+2. its formula;
+3. the listing's formula;
+4. the listing's markup;
+5. the event's own price.
 
 ### Users (`resource: user`)
 
