@@ -568,11 +568,74 @@ var ATTENDEE_CHANGED_SAMPLE = payloadSample(
   ATTENDEE_SAMPLE,
   []
 );
+var CHANNEL_OUTPUT = [
+  s("id", "Channel ID"),
+  s("name", "Name"),
+  s("description", "Description"),
+  s("type", "Type (website, social, promoter, affiliate, api, seller, other)"),
+  s("status", "Status (active, inactive)"),
+  b("isPublic", "Public in the marketplace"),
+  s("code", "Attribution code"),
+  a("tags", "Tags"),
+  o("listingOptions", "Listing options (description formats, fees, extra listings, properties)"),
+  o("pricing", "Default pricing for your own events' listings that set none"),
+  s("pricing.formulaId", "Default price formula ID"),
+  n("pricing.markupPercent", "Default markup %"),
+  s("logo.url", "Logo (marketplace branding)"),
+  s("brandColor", "Brand color (marketplace branding)"),
+  s("companyId", "Company ID"),
+  s("created", "Created (UTC)"),
+  s("changed", "Changed (UTC)")
+];
+var CHANNEL_LISTED_EVENT_OUTPUT = [
+  s("id", "Event ID"),
+  s("slug", "Slug"),
+  s("name", "Name"),
+  s("start", "Start (ISO)"),
+  s("end", "End (ISO)"),
+  s("tz", "Timezone"),
+  s("status", "Event status"),
+  s("flyer.url", "Flyer URL"),
+  o("location", "Location"),
+  s("listing.visibility", "Visibility on the channel (visible, hidden)"),
+  a("listing.tags", "Listing tags"),
+  o("listing.meta", "Listing meta"),
+  n("listing.priority", "Listing priority"),
+  b("listing.orphaned", "Orphaned (the event is no longer live, so the channel does not show it)")
+];
+var CHANNEL_LISTING_OUTPUT = [
+  s("eventId", "Event ID"),
+  s("channelId", "Channel ID"),
+  s("listingId", "Listing ID (primary, or an extra listing's id)"),
+  s("slug", "Listing slug"),
+  o("properties", "Listing properties")
+];
+var CHANNEL_EVENT_OUTPUT = [
+  ...EVENT_OUTPUT,
+  o("description", "Description on the channel"),
+  s("description.html", "Description on the channel (HTML)"),
+  a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)"),
+  b("salesEnabled", "Ticket sales on (false while the organizer has paused them on the channel)")
+];
+var CHANNEL_EVENT_SAMPLE = {
+  ...EVENT_SAMPLE,
+  name: "Friday Night Social \u2014 on Sample Channel",
+  description: { html: "<p>Live DJs, a welcome drink and a packed room.</p>" },
+  ticketPrices: ["USD,5500"],
+  salesEnabled: true
+};
+var CHANNEL_TICKET_OUTPUT = TICKET_OUTPUT.filter(
+  (f) => f.key !== "capacity" && f.key !== "quantitySold"
+).map(
+  (f) => f.key === "status" ? { ...f, label: "Status (live, sold-out; unavailable while sales on the channel are paused)" } : f.key === "costs.cost" ? { ...f, label: `Price on the channel ${COSTS_HINT}` } : f
+);
+var { capacity: _capacity, quantitySold: _sold, ...CHANNEL_TICKET_SAMPLE_BASE } = TICKET_SAMPLE;
+var CHANNEL_TICKET_SAMPLE = {
+  ...CHANNEL_TICKET_SAMPLE_BASE,
+  costs: { ...TICKET_SAMPLE.costs, cost: "USD,2750", gross: "USD,3025", total: "USD,3025" }
+};
 var CHANNEL_EVENT_CHANGED_OUTPUT = [
-  ...payloadOutput("The event as the channel shows this listing", [
-    ...EVENT_OUTPUT,
-    a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)")
-  ]).map(
+  ...payloadOutput("The event as the channel shows this listing", CHANNEL_EVENT_OUTPUT).map(
     (f) => f.key === "type" ? { ...f, label: "Type (channelEvent)" } : f.key === "meta.changedFields" ? { ...f, label: "Changed fields (e.g. event.name, tickets.<id>.costs, customization)" } : f
   ),
   s("meta.channelId", "Channel ID"),
@@ -583,7 +646,7 @@ var CHANNEL_EVENT_CHANGED_SAMPLE = {
   ...payloadSample(
     "channelEvent.changed",
     `/channels/ch_sample/events/${ID.event}/listings/primary`,
-    { ...EVENT_SAMPLE, name: "Friday Night Social \u2014 on Sample Channel", ticketPrices: ["USD,5500"] },
+    CHANNEL_EVENT_SAMPLE,
     ["tickets.SampleTicket01.costs"],
     { channelId: "ch_sample", listingId: "primary", properties: { eventbriteId: "1234567890" } }
   ),
@@ -882,6 +945,29 @@ var objectChanged = {
 };
 var object_changed_default = objectChanged;
 
+// lib/channel-event.ts
+function fetchChannelEvent(ctx, ref) {
+  return new CohostClient(ctx).request(`/events/${encodeURIComponent(ref.eventId)}`, {
+    query: { listingId: ref.listingId?.trim() },
+    headers: { "x-cohost-channel-id": ref.channelId }
+  });
+}
+function isCohostNotFound(error) {
+  return error instanceof Error && /^Cohost 404 /.test(error.message);
+}
+function fetchChannelEventTickets(ctx, ref) {
+  return new CohostClient(ctx).request(`/events/${encodeURIComponent(ref.eventId)}/tickets`, {
+    query: { listingId: ref.listingId?.trim() },
+    headers: { "x-cohost-channel-id": ref.channelId }
+  });
+}
+function notShownOnChannel(ref) {
+  const listing = ref.listingId?.trim() && ref.listingId.trim() !== "primary" ? ` (listing ${ref.listingId.trim()})` : "";
+  return new Error(
+    `Event ${ref.eventId}${listing} is not shown on channel ${ref.channelId}: not listed there, hidden, or not live`
+  );
+}
+
 // triggers/channel-event-changed.ts
 var ACTIONS5 = ["listed", "changed", "unlisted"];
 var DEFAULT_ACTIONS4 = ["listed", "changed", "unlisted"];
@@ -937,12 +1023,9 @@ var channelEventChanged = {
     let data = null;
     if (ping.action !== "channelEvent.unlisted") {
       try {
-        data = await new CohostClient(ctx).request(`/events/${encodeURIComponent(listing.eventId)}`, {
-          query: { listingId: listing.listingId },
-          headers: { "x-cohost-channel-id": listing.channelId }
-        });
+        data = await fetchChannelEvent(ctx, listing);
       } catch (error) {
-        if (!(error instanceof Error && /^Cohost 404 /.test(error.message))) throw error;
+        if (!isCohostNotFound(error)) throw error;
       }
     }
     return [{
@@ -1436,6 +1519,787 @@ var setChannelListingProperties = {
   }
 };
 var set_channel_listing_properties_default = setChannelListingProperties;
+
+// actions/assign-price-formula.ts
+var ticketIds = (value) => [
+  ...new Set(
+    (value ?? "").split(/[\s,]+/).map((part) => part.trim()).filter(Boolean).map(
+      (part) => part.startsWith("urn:") ? part.split("/").pop() ?? part : part
+    )
+  )
+];
+var assignPriceFormula = {
+  key: "assign-price-formula",
+  type: "perform",
+  resource: "price-formula",
+  title: "Assign Price Formula",
+  description: "Price an event's tickets on a sales channel by one of your price formulas.",
+  idempotent: true,
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "event", label: "Event (ID or URN)", type: "string", required: true },
+    {
+      key: "formulaId",
+      label: "Formula ID",
+      type: "string",
+      hint: "Blank removes the formula from the tickets (or the listing), which fall back to the listing's pricing."
+    },
+    {
+      key: "tickets",
+      label: "Ticket IDs",
+      type: "text",
+      hint: "Comma or line separated, e.g. the GA and fast pass tickets. Blank sets the formula for the whole listing."
+    },
+    {
+      key: "listingId",
+      label: "Listing ID",
+      type: "string",
+      default: "primary",
+      hint: "primary, or an extra listing's id (meta.listingId on Channel Event Changed)."
+    }
+  ],
+  output: [
+    { key: "eventId", type: "string", label: "Event ID" },
+    { key: "channelId", type: "string", label: "Channel ID" },
+    { key: "listingId", type: "string", label: "Listing ID" },
+    { key: "pricing.formulaId", type: "string", label: "The listing's formula" },
+    { key: "pricing.formulas", type: "object", label: "Ticket ID \u2192 formula" },
+    { key: "pricing.prices", type: "object", label: "Ticket ID \u2192 own channel price" },
+    { key: "pricing.markupPercent", type: "number", label: "Markup %" }
+  ],
+  async execute(input, ctx) {
+    const eventId = resourceId(input.event.trim(), "events");
+    const channelId = input.channelId.trim();
+    const listingId = input.listingId?.trim() || "primary";
+    const formulaId = input.formulaId?.trim() || void 0;
+    const tickets = ticketIds(input.tickets);
+    const path = `/events/${encodeURIComponent(eventId)}/channels/${encodeURIComponent(channelId)}/customization`;
+    const query = listingId === "primary" ? void 0 : { listingId };
+    const client = new CohostClient(ctx);
+    const view = await client.request(path, { query });
+    const current = view.customization ?? {};
+    const pricing = { ...current.pricing ?? {} };
+    const prices = { ...pricing.prices ?? {} };
+    const formulas = { ...pricing.formulas ?? {} };
+    if (tickets.length === 0) {
+      if (formulaId) pricing.formulaId = formulaId;
+      else delete pricing.formulaId;
+    } else {
+      for (const ticketId of tickets) {
+        if (formulaId) {
+          formulas[ticketId] = formulaId;
+          delete prices[ticketId];
+        } else {
+          delete formulas[ticketId];
+        }
+      }
+    }
+    ctx.log("info", "assigning price formula", { eventId, channelId, listingId, formulaId, tickets: tickets.length });
+    const saved = await client.request(path, {
+      method: "PUT",
+      query,
+      body: { customization: { ...current, fees: current.fees ?? [], pricing: { ...pricing, prices, formulas } } }
+    });
+    return { eventId, channelId, listingId: saved.listingId ?? listingId, pricing: saved.customization?.pricing ?? null };
+  }
+};
+var assign_price_formula_default = assignPriceFormula;
+
+// lib/price-formulas.ts
+var formulaPath = (formulaId) => formulaId === void 0 ? "/company/price-formulas" : `/company/price-formulas/${encodeURIComponent(formulaId.trim())}`;
+var FORMULA_CURRENCY_OPTIONS = ["USD", "CAD", "EUR", "GBP", "AUD", "ILS"].map((value) => ({
+  value,
+  label: value
+}));
+var toAmount = (amount, currency) => {
+  if (amount === void 0 || amount === null || Number.isNaN(Number(amount))) return void 0;
+  const minor = Math.round(Number(amount) * 100);
+  if (minor < 0) throw new Error("Amount cannot be negative");
+  return minor > 0 ? `${(currency || "USD").trim().toUpperCase()},${minor}` : void 0;
+};
+var CAP_TYPE_OPTIONS = [
+  { value: "none", label: "No cap" },
+  { value: "amount", label: "At most an amount" },
+  { value: "percent", label: "At most a percent of the price" }
+];
+var toCap = (type, cap, currency) => {
+  if (type === "none") return {};
+  const value = Number(cap);
+  if (cap === void 0 || cap === null || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`Cap must be a number above 0 when the cap type is "${type}"`);
+  }
+  if (type === "percent") return { capPercent: value };
+  return { capAmount: `${(currency || "USD").trim().toUpperCase()},${Math.round(value * 100)}` };
+};
+var PRICE_FORMULA_OUTPUT = [
+  { key: "id", type: "string", label: "Formula ID" },
+  { key: "name", type: "string", label: "Name" },
+  { key: "description", type: "string", label: "Description" },
+  { key: "markupPercent", type: "number", label: "Markup %" },
+  { key: "amount", type: "string", label: "Amount added (CUR,minor)" },
+  { key: "capAmount", type: "string", label: "Cap: the most it adds (CUR,minor)" },
+  { key: "capPercent", type: "number", label: "Cap: the most it adds, % of the price" },
+  { key: "usage.events", type: "number", label: "Used on: events" },
+  { key: "usage.listings", type: "number", label: "Used on: channel listings" },
+  { key: "usage.tickets", type: "number", label: "Used on: tickets assigned it" },
+  { key: "usage.channels", type: "number", label: "Used on: channels' default pricing" },
+  { key: "created", type: "string", label: "Created" },
+  { key: "changed", type: "string", label: "Changed" }
+];
+var ASSIGNMENT_OUTPUT = [
+  { key: "eventId", type: "string", label: "Event ID" },
+  { key: "channelId", type: "string", label: "Channel ID" },
+  { key: "listingId", type: "string", label: "Listing ID" },
+  { key: "offeringIds", type: "array", label: "Ticket IDs assigned the formula" },
+  { key: "listingWide", type: "boolean", label: "The listing's formula (prices its other tickets)" }
+];
+var PRICE_FORMULA_DETAIL_OUTPUT = [
+  ...PRICE_FORMULA_OUTPUT,
+  { key: "assignments", type: "array", label: "Where it is assigned", items: ASSIGNMENT_OUTPUT },
+  {
+    key: "channels",
+    type: "array",
+    label: "Channels whose default pricing it is",
+    items: [
+      { key: "channelId", type: "string", label: "Channel ID" },
+      { key: "name", type: "string", label: "Channel name" }
+    ]
+  }
+];
+
+// actions/create-price-formula.ts
+var createPriceFormula = {
+  key: "create-price-formula",
+  type: "perform",
+  resource: "price-formula",
+  title: "Create Price Formula",
+  description: "Save a named pricing rule (markup %, plus an amount, optionally capped) to assign to tickets on channels.",
+  idempotent: false,
+  params: [
+    { key: "name", label: "Name", type: "string", required: true, hint: "e.g. Eventbrite VIP" },
+    {
+      key: "currency",
+      label: "Amount currency",
+      type: "select",
+      required: true,
+      default: "USD",
+      options: FORMULA_CURRENCY_OPTIONS,
+      hint: "The amount is only added to tickets priced in this currency."
+    },
+    {
+      key: "markupPercent",
+      label: "Markup %",
+      type: "number",
+      validation: { min: 0, max: 1e3 },
+      hint: "Raises the ticket price by this percent, e.g. 15."
+    },
+    {
+      key: "amount",
+      label: "Amount added",
+      type: "number",
+      validation: { min: 0 },
+      hint: "Added after the markup, in major units, e.g. 10 for $10.00."
+    },
+    {
+      key: "capType",
+      label: "Cap",
+      type: "select",
+      default: "none",
+      options: CAP_TYPE_OPTIONS,
+      hint: "Limits what the markup and amount together add to a ticket."
+    },
+    {
+      key: "cap",
+      label: "Cap value",
+      type: "number",
+      validation: { min: 0 },
+      hint: "For an amount cap, major units in the amount currency (100 for $100.00); for a percent cap, the percent (20)."
+    },
+    { key: "description", label: "Description", type: "text" }
+  ],
+  output: PRICE_FORMULA_OUTPUT,
+  async execute(input, ctx) {
+    const body = { name: input.name.trim(), markupPercent: Number(input.markupPercent ?? 0) };
+    const amount = toAmount(input.amount, input.currency);
+    if (amount) body.amount = amount;
+    Object.assign(body, toCap(input.capType ?? "none", input.cap, input.currency));
+    if (input.description?.trim()) body.description = input.description.trim();
+    ctx.log("info", "creating price formula", { name: body.name });
+    return new CohostClient(ctx).request(formulaPath(), { method: "POST", body });
+  }
+};
+var create_price_formula_default = createPriceFormula;
+
+// actions/delete-price-formula.ts
+var deletePriceFormula = {
+  key: "delete-price-formula",
+  type: "perform",
+  resource: "price-formula",
+  title: "Delete Price Formula",
+  description: "Delete a price formula no channel listing uses any more.",
+  idempotent: true,
+  params: [{ key: "formulaId", label: "Formula ID", type: "string", required: true }],
+  output: [
+    { key: "deleted", type: "boolean", label: "Deleted" },
+    { key: "id", type: "string", label: "Formula ID" }
+  ],
+  async execute(input, ctx) {
+    ctx.log("info", "deleting price formula", { formulaId: input.formulaId });
+    await new CohostClient(ctx).request(formulaPath(input.formulaId), { method: "DELETE" });
+    return { deleted: true, id: input.formulaId.trim() };
+  }
+};
+var delete_price_formula_default = deletePriceFormula;
+
+// actions/get-price-formula.ts
+var getPriceFormula = {
+  key: "get-price-formula",
+  type: "read",
+  resource: "price-formula",
+  title: "Get Price Formula",
+  description: "Get a price formula and every channel listing and ticket it prices.",
+  params: [{ key: "formulaId", label: "Formula ID", type: "string", required: true }],
+  output: PRICE_FORMULA_DETAIL_OUTPUT,
+  async execute(input, ctx) {
+    ctx.log("info", "getting price formula", { formulaId: input.formulaId });
+    return new CohostClient(ctx).request(formulaPath(input.formulaId));
+  }
+};
+var get_price_formula_default = getPriceFormula;
+
+// actions/list-price-formulas.ts
+var OUTPUT = [{ key: "results", type: "array", label: "Price formulas", items: PRICE_FORMULA_OUTPUT }];
+var listPriceFormulas = {
+  key: "list-price-formulas",
+  type: "read",
+  resource: "price-formula",
+  title: "List Price Formulas",
+  description: "List your company's price formulas, with how many events, listings and tickets use each.",
+  params: [],
+  output: OUTPUT,
+  async execute(_input, ctx) {
+    ctx.log("info", "listing price formulas");
+    const results = await new CohostClient(ctx).request(formulaPath());
+    return { results: results ?? [] };
+  }
+};
+var list_price_formulas_default = listPriceFormulas;
+
+// actions/update-price-formula.ts
+var given = (value) => value !== void 0 && value !== null && value !== "";
+var nextCap = (input, current, currency) => {
+  const currentType = current.capPercent ? "percent" : current.capAmount ? "amount" : "none";
+  const type = given(input.capType) ? input.capType : currentType;
+  if (type === "none") {
+    if (given(input.cap) && !given(input.capType)) throw new Error('Choose a cap type to set a cap value: "amount" or "percent"');
+    return {};
+  }
+  if (given(input.cap)) return toCap(type, input.cap, currency);
+  if (type !== currentType) throw new Error(`Cap value is required to switch the cap to "${type}"`);
+  if (type === "percent") return { capPercent: current.capPercent };
+  const minor = (current.capAmount ?? "").split(",")[1];
+  return { capAmount: `${currency},${minor}` };
+};
+var updatePriceFormula = {
+  key: "update-price-formula",
+  type: "perform",
+  resource: "price-formula",
+  title: "Update Price Formula",
+  description: "Change a price formula (markup, amount, cap) \u2014 every ticket it is assigned to is repriced at once.",
+  idempotent: true,
+  params: [
+    { key: "formulaId", label: "Formula ID", type: "string", required: true },
+    { key: "name", label: "Name", type: "string", hint: "Blank keeps the name." },
+    {
+      key: "markupPercent",
+      label: "Markup %",
+      type: "number",
+      validation: { min: 0, max: 1e3 },
+      hint: "Blank keeps the markup; 0 removes it."
+    },
+    {
+      key: "amount",
+      label: "Amount added",
+      type: "number",
+      validation: { min: 0 },
+      hint: "Major units, e.g. 10 for $10.00. Blank keeps the amount; 0 removes it."
+    },
+    {
+      key: "currency",
+      label: "Amount currency",
+      type: "select",
+      options: FORMULA_CURRENCY_OPTIONS,
+      hint: "Blank keeps the amount's currency (USD for a new amount)."
+    },
+    {
+      key: "capType",
+      label: "Cap",
+      type: "select",
+      options: CAP_TYPE_OPTIONS,
+      hint: "Blank keeps the cap; No cap removes it."
+    },
+    {
+      key: "cap",
+      label: "Cap value",
+      type: "number",
+      validation: { min: 0 },
+      hint: "Amount cap: major units (100 for $100.00); percent cap: the percent (20). Blank keeps the value."
+    },
+    { key: "description", label: "Description", type: "text", hint: "Blank keeps the description." }
+  ],
+  output: PRICE_FORMULA_DETAIL_OUTPUT,
+  async execute(input, ctx) {
+    const client = new CohostClient(ctx);
+    const current = await client.request(formulaPath(input.formulaId));
+    const [currentCurrency, currentMinor] = (current.amount ?? "").split(",");
+    const body = {
+      name: input.name?.trim() || current.name,
+      markupPercent: input.markupPercent ?? current.markupPercent ?? 0
+    };
+    const currency = input.currency?.trim() || currentCurrency || current.capAmount?.split(",")[0] || "USD";
+    const amount = input.amount !== void 0 && input.amount !== null ? toAmount(input.amount, currency) : currentMinor ? `${currency},${currentMinor}` : void 0;
+    if (amount) body.amount = amount;
+    Object.assign(body, nextCap(input, current, currency));
+    const description = input.description?.trim() || current.description;
+    if (description) body.description = description;
+    ctx.log("info", "updating price formula", { formulaId: input.formulaId });
+    return client.request(formulaPath(input.formulaId), { method: "PUT", body });
+  }
+};
+var update_price_formula_default = updatePriceFormula;
+
+// lib/channels.ts
+var CHANNEL_TYPES = ["website", "social", "promoter", "affiliate", "api", "seller", "other"];
+var CHANNEL_TYPE_OPTIONS = CHANNEL_TYPES.map((value) => ({
+  value,
+  label: value[0].toUpperCase() + value.slice(1)
+}));
+var channelPath = (channelId, ...rest) => ["/company/sales-channels", channelId, ...rest].map((part, i) => i === 0 ? part : encodeURIComponent(part.trim())).join("/");
+var DEFAULT_PRICING_PARAMS = [
+  {
+    key: "pricingFormulaId",
+    label: "Default price formula ID",
+    type: "string",
+    hint: "Optional. Prices your own events' listings on the channel that set no formula or markup of their own. Replaces the default markup."
+  },
+  {
+    key: "pricingMarkupPercent",
+    label: "Default markup %",
+    type: "number",
+    hint: "Optional. Used when no default price formula is given; 0 means no default."
+  }
+];
+var defaultPricingOf = (input) => {
+  const formulaId = input.pricingFormulaId?.trim();
+  if (formulaId) return { formulaId };
+  if (input.pricingMarkupPercent === void 0 || input.pricingMarkupPercent === "") return void 0;
+  const markupPercent = Number(input.pricingMarkupPercent);
+  if (!Number.isFinite(markupPercent) || markupPercent < 0 || markupPercent > 1e3) {
+    throw new Error("Default markup % must be a number from 0 to 1000");
+  }
+  return markupPercent === 0 ? null : { markupPercent };
+};
+
+// actions/list-channels.ts
+var OUTPUT2 = [{ key: "results", type: "array", label: "Channels", items: CHANNEL_OUTPUT }];
+var listChannels = {
+  key: "list-channels",
+  type: "read",
+  resource: "channel",
+  title: "List Channels",
+  description: "List the sales channels your company owns.",
+  params: [
+    {
+      key: "type",
+      label: "Type",
+      type: "select",
+      options: CHANNEL_TYPE_OPTIONS,
+      hint: "Optional. Only channels of this type."
+    }
+  ],
+  output: OUTPUT2,
+  async execute(input, ctx) {
+    ctx.log("info", "listing channels", { type: input.type });
+    const results = await new CohostClient(ctx).request("/company/sales-channels", {
+      query: { type: input.type }
+    });
+    return { results };
+  }
+};
+var list_channels_default = listChannels;
+
+// actions/get-channel.ts
+var getChannel = {
+  key: "get-channel",
+  type: "read",
+  resource: "channel",
+  title: "Get Channel",
+  description: "Fetch one of your sales channels by id.",
+  params: [{ key: "channelId", label: "Channel ID", type: "string", required: true }],
+  output: CHANNEL_OUTPUT,
+  async execute(input, ctx) {
+    ctx.log("info", "fetching channel", { channelId: input.channelId });
+    return new CohostClient(ctx).request(channelPath(input.channelId));
+  }
+};
+var get_channel_default = getChannel;
+
+// actions/create-channel.ts
+var createChannel = {
+  key: "create-channel",
+  type: "perform",
+  resource: "channel",
+  title: "Create Channel",
+  description: "Create a sales channel for your company.",
+  idempotent: false,
+  params: [
+    { key: "name", label: "Name", type: "string", required: true },
+    { key: "type", label: "Type", type: "select", required: true, default: "website", options: CHANNEL_TYPE_OPTIONS },
+    { key: "description", label: "Description", type: "text" },
+    {
+      key: "isPublic",
+      label: "Public in the marketplace",
+      type: "boolean",
+      default: false,
+      hint: "Other organizers can find the channel and apply to list their events on it. Needs the channel's marketplace branding first: a logo and a brand color (fields: logo, brandColor)."
+    },
+    ...DEFAULT_PRICING_PARAMS,
+    {
+      key: "fields",
+      label: "Other fields",
+      type: "json",
+      hint: 'Optional. Any other channel fields, e.g. { "tags": ["nightlife"], "listingOptions": { "allowFees": true } }.'
+    }
+  ],
+  output: CHANNEL_OUTPUT,
+  async execute(input, ctx) {
+    const extra = input.fields && typeof input.fields === "object" && !Array.isArray(input.fields) ? input.fields : {};
+    const channel = { ...extra, name: input.name.trim(), type: input.type };
+    if (input.description?.trim()) channel.description = input.description.trim();
+    if (input.isPublic !== void 0) channel.isPublic = input.isPublic;
+    const pricing = defaultPricingOf(input);
+    if (pricing) channel.pricing = pricing;
+    ctx.log("info", "creating channel", { name: channel.name, type: channel.type });
+    return new CohostClient(ctx).request("/company/sales-channels", { method: "POST", body: { channel } });
+  }
+};
+var create_channel_default = createChannel;
+
+// actions/update-channel.ts
+var updateChannel = {
+  key: "update-channel",
+  type: "perform",
+  resource: "channel",
+  title: "Update Channel",
+  description: "Change one of your sales channels; only the fields you fill in change.",
+  idempotent: true,
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "name", label: "Name", type: "string" },
+    { key: "description", label: "Description", type: "text" },
+    {
+      key: "status",
+      label: "Status",
+      type: "select",
+      options: [
+        { value: "active", label: "Active" },
+        { value: "inactive", label: "Inactive" }
+      ]
+    },
+    {
+      key: "isPublic",
+      label: "Public in the marketplace",
+      type: "boolean",
+      hint: "Making it public (or asking to) needs the channel's marketplace branding first: a logo and a brand color."
+    },
+    ...DEFAULT_PRICING_PARAMS,
+    {
+      key: "clearPricing",
+      label: "Clear the default pricing",
+      type: "boolean",
+      hint: "Drop the channel's default price formula or markup: its listings price at the event's own prices again."
+    },
+    {
+      key: "changes",
+      label: "Other changes",
+      type: "json",
+      hint: 'Optional. Any other channel fields, e.g. { "tags": ["nightlife"], "listingOptions": { "allowFees": true } }.'
+    }
+  ],
+  output: CHANNEL_OUTPUT,
+  async execute(input, ctx) {
+    const extra = input.changes && typeof input.changes === "object" && !Array.isArray(input.changes) ? input.changes : {};
+    const channel = { ...extra };
+    if (input.name?.trim()) channel.name = input.name.trim();
+    if (input.description !== void 0 && input.description !== "") channel.description = input.description;
+    if (input.status) channel.status = input.status;
+    if (input.isPublic !== void 0) channel.isPublic = input.isPublic;
+    const pricing = input.clearPricing ? null : defaultPricingOf(input);
+    if (pricing !== void 0) channel.pricing = pricing;
+    if (Object.keys(channel).length === 0) throw new Error("Nothing to change: fill in at least one field");
+    ctx.log("info", "updating channel", { channelId: input.channelId, fields: Object.keys(channel) });
+    return new CohostClient(ctx).request(channelPath(input.channelId), { method: "PUT", body: { channel } });
+  }
+};
+var update_channel_default = updateChannel;
+
+// actions/delete-channel.ts
+var deleteChannel = {
+  key: "delete-channel",
+  type: "perform",
+  resource: "channel",
+  title: "Delete Channel",
+  description: "Delete one of your sales channels.",
+  idempotent: true,
+  params: [{ key: "channelId", label: "Channel ID", type: "string", required: true }],
+  output: [
+    { key: "deleted", type: "boolean", label: "Deleted" },
+    { key: "id", type: "string", label: "Channel ID" }
+  ],
+  async execute(input, ctx) {
+    ctx.log("info", "deleting channel", { channelId: input.channelId });
+    await new CohostClient(ctx).request(channelPath(input.channelId), { method: "DELETE" });
+    return { deleted: true, id: input.channelId.trim() };
+  }
+};
+var delete_channel_default = deleteChannel;
+
+// actions/list-channel-events.ts
+var OUTPUT3 = [
+  { key: "results", type: "array", label: "Events on the channel", items: CHANNEL_LISTED_EVENT_OUTPUT },
+  { key: "total", type: "number", label: "Total events on the channel" }
+];
+var listChannelEvents = {
+  key: "list-channel-events",
+  type: "read",
+  resource: "channel",
+  title: "List Channel Events",
+  description: "List the events listed on one of your sales channels.",
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "status", label: "Event status", type: "string", hint: "Optional, comma-separated, e.g. live,ended." },
+    {
+      key: "activeAt",
+      label: "Runs on date",
+      type: "string",
+      hint: "Optional YYYY-MM-DD: only events running on that date, in their own timezone."
+    },
+    {
+      key: "orderBy",
+      label: "Order by",
+      type: "select",
+      options: [
+        { value: "start", label: "Start date" },
+        { value: "priority", label: "Listing priority" }
+      ]
+    },
+    {
+      key: "order",
+      label: "Order",
+      type: "select",
+      options: [
+        { value: "asc", label: "Ascending" },
+        { value: "desc", label: "Descending" }
+      ]
+    },
+    { key: "limit", label: "Page size", type: "number", default: 20, hint: "1 to 100." },
+    { key: "offset", label: "Offset", type: "number", default: 0 }
+  ],
+  output: OUTPUT3,
+  async execute(input, ctx) {
+    ctx.log("info", "listing channel events", { channelId: input.channelId });
+    const page = await new CohostClient(ctx).request(
+      channelPath(input.channelId, "events"),
+      {
+        query: {
+          status: input.status?.replace(/\s+/g, ""),
+          activeAt: input.activeAt?.trim(),
+          orderBy: input.orderBy,
+          order: input.order,
+          limit: input.limit,
+          offset: input.offset
+        }
+      }
+    );
+    return { results: page.items ?? [], total: page.total ?? 0 };
+  }
+};
+var list_channel_events_default = listChannelEvents;
+
+// actions/list-channel-event-listings.ts
+var OUTPUT4 = [{ key: "results", type: "array", label: "Listings", items: CHANNEL_LISTING_OUTPUT }];
+var listChannelEventListings = {
+  key: "list-channel-event-listings",
+  type: "read",
+  resource: "channel",
+  title: "List Channel Event Listings",
+  description: "List an event's listings on one of your sales channels, with the properties your channel keeps on each.",
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "event", label: "Event (ID or URN)", type: "string", required: true }
+  ],
+  output: OUTPUT4,
+  async execute(input, ctx) {
+    const eventId = resourceId(input.event, "events");
+    ctx.log("info", "listing channel event listings", { channelId: input.channelId, eventId });
+    const results = await new CohostClient(ctx).request(
+      channelPath(input.channelId, "events", eventId, "listings")
+    );
+    return { results };
+  }
+};
+var list_channel_event_listings_default = listChannelEventListings;
+
+// actions/set-channel-event-visibility.ts
+var setChannelEventVisibility = {
+  key: "set-channel-event-visibility",
+  type: "perform",
+  resource: "channel",
+  title: "Show or Hide Channel Event",
+  description: "Show or hide an event on one of your sales channels, without removing it.",
+  idempotent: true,
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "event", label: "Event (ID or URN)", type: "string", required: true },
+    {
+      key: "visibility",
+      label: "Visibility",
+      type: "select",
+      required: true,
+      default: "hidden",
+      options: [
+        { value: "visible", label: "Visible" },
+        { value: "hidden", label: "Hidden" }
+      ]
+    }
+  ],
+  output: [
+    { key: "eventId", type: "string", label: "Event ID" },
+    { key: "channelId", type: "string", label: "Channel ID" },
+    { key: "visibility", type: "string", label: "Visibility" },
+    { key: "slug", type: "string", label: "Listing slug" },
+    { key: "tags", type: "array", label: "Listing tags" },
+    { key: "meta", type: "object", label: "Listing meta" }
+  ],
+  async execute(input, ctx) {
+    const eventId = resourceId(input.event, "events");
+    ctx.log("info", "setting channel event visibility", { channelId: input.channelId, eventId, visibility: input.visibility });
+    return new CohostClient(ctx).request(channelPath(input.channelId, "events", eventId, "listing"), {
+      method: "PATCH",
+      body: { visibility: input.visibility }
+    });
+  }
+};
+var set_channel_event_visibility_default = setChannelEventVisibility;
+
+// actions/remove-channel-event.ts
+var removeChannelEvent = {
+  key: "remove-channel-event",
+  type: "perform",
+  resource: "channel",
+  title: "Remove Channel Event",
+  description: "Take an event off one of your sales channels.",
+  idempotent: false,
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "event", label: "Event (ID or URN)", type: "string", required: true }
+  ],
+  output: [
+    { key: "removed", type: "boolean", label: "Removed" },
+    { key: "eventId", type: "string", label: "Event ID" },
+    { key: "channelId", type: "string", label: "Channel ID" }
+  ],
+  async execute(input, ctx) {
+    const eventId = resourceId(input.event, "events");
+    ctx.log("info", "removing event from channel", { channelId: input.channelId, eventId });
+    await new CohostClient(ctx).request(channelPath(input.channelId, "events", eventId), { method: "DELETE" });
+    return { removed: true, eventId, channelId: input.channelId.trim() };
+  }
+};
+var remove_channel_event_default = removeChannelEvent;
+
+// actions/get-channel-event.ts
+var OUTPUT5 = [
+  ...CHANNEL_EVENT_OUTPUT,
+  { key: "tickets", type: "array", label: "Tickets on the channel", items: CHANNEL_TICKET_OUTPUT }
+];
+var getChannelEvent = {
+  key: "get-channel-event",
+  type: "read",
+  resource: "channel",
+  title: "Get Channel Event",
+  description: "Fetch an event as your sales channel shows it \u2014 its channel name, description, whether sales are on, and its tickets at channel prices.",
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "event", label: "Event (ID, slug or URN)", type: "string", required: true },
+    {
+      key: "listingId",
+      label: "Listing ID",
+      type: "string",
+      default: "primary",
+      hint: "primary, or an extra listing's id (meta.listingId on Channel Event Changed)."
+    }
+  ],
+  output: OUTPUT5,
+  async execute(input, ctx) {
+    const ref = {
+      channelId: input.channelId.trim(),
+      eventId: resourceId(input.event, "events"),
+      listingId: input.listingId
+    };
+    ctx.log("info", "fetching channel event", { ...ref });
+    try {
+      const [event, tickets] = await Promise.all([
+        fetchChannelEvent(ctx, ref),
+        fetchChannelEventTickets(ctx, ref)
+      ]);
+      return { ...event, tickets };
+    } catch (error) {
+      if (isCohostNotFound(error)) throw notShownOnChannel(ref);
+      throw error;
+    }
+  }
+};
+var get_channel_event_default = getChannelEvent;
+
+// actions/list-channel-event-tickets.ts
+var OUTPUT6 = [
+  { key: "results", type: "array", label: "Tickets on the channel", items: CHANNEL_TICKET_OUTPUT }
+];
+var listChannelEventTickets = {
+  key: "list-channel-event-tickets",
+  type: "read",
+  resource: "channel",
+  title: "List Channel Event Tickets",
+  description: "List the tickets your sales channel sells for an event, at the channel's prices.",
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "event", label: "Event (ID, slug or URN)", type: "string", required: true },
+    {
+      key: "listingId",
+      label: "Listing ID",
+      type: "string",
+      default: "primary",
+      hint: "primary, or an extra listing's id (meta.listingId on Channel Event Changed)."
+    }
+  ],
+  output: OUTPUT6,
+  async execute(input, ctx) {
+    const ref = {
+      channelId: input.channelId.trim(),
+      eventId: resourceId(input.event, "events"),
+      listingId: input.listingId
+    };
+    ctx.log("info", "listing channel event tickets", { ...ref });
+    try {
+      return { results: await fetchChannelEventTickets(ctx, ref) };
+    } catch (error) {
+      if (isCohostNotFound(error)) throw notShownOnChannel(ref);
+      throw error;
+    }
+  }
+};
+var list_channel_event_tickets_default = listChannelEventTickets;
 
 // actions/delete-event-ticket.ts
 var deleteEventTicket = {
@@ -2032,7 +2896,7 @@ var RESOURCE_FIELDS = [
   { key: "meta.implementation.id", type: "string", label: "Connection app ID (eventbrite@1.0.0, \u2026)" },
   { key: "meta.implementation.name", type: "string", label: "Connection app name" }
 ];
-var OUTPUT = [{ key: "results", type: "array", label: "Mapped resources", items: RESOURCE_FIELDS }];
+var OUTPUT7 = [{ key: "results", type: "array", label: "Mapped resources", items: RESOURCE_FIELDS }];
 var findMappedResources = {
   key: "find-mapped-resources",
   type: "read",
@@ -2055,7 +2919,7 @@ var findMappedResources = {
       hint: "Optional JSON object with any label keys and values to match on mapped resources. All supplied labels must match; extra stored labels are allowed. Leave empty for no label filtering."
     }
   ],
-  output: OUTPUT,
+  output: OUTPUT7,
   sample: {
     results: [
       {
@@ -2086,7 +2950,7 @@ var findMappedResources = {
 var find_mapped_resources_default = findMappedResources;
 
 // actions/resolve-urn.ts
-var OUTPUT2 = [
+var OUTPUT8 = [
   { key: "urn", type: "string", label: "URN" },
   { key: "labels", type: "object", label: "Labels" },
   { key: "resources", type: "array", label: "Resources", items: [{ key: "urn", type: "string", label: "URN" }] }
@@ -2112,7 +2976,7 @@ var resolveUrn = {
       hint: "Optional. system-resource returns only the Cohost records. Empty returns every resource."
     }
   ],
-  output: OUTPUT2,
+  output: OUTPUT8,
   async execute(input, ctx) {
     ctx.log("info", "resolving urn", { urn: input.urn, type: input.type });
     const client = new CohostClient(ctx);
@@ -2605,7 +3469,25 @@ var index_default = {
     update_organizer_default,
     delete_organizer_default,
     // sales channels
+    list_channels_default,
+    get_channel_default,
+    create_channel_default,
+    update_channel_default,
+    delete_channel_default,
+    list_channel_events_default,
+    get_channel_event_default,
+    list_channel_event_tickets_default,
+    list_channel_event_listings_default,
+    set_channel_event_visibility_default,
+    remove_channel_event_default,
     set_channel_listing_properties_default,
+    // price formulas
+    list_price_formulas_default,
+    get_price_formula_default,
+    create_price_formula_default,
+    update_price_formula_default,
+    delete_price_formula_default,
+    assign_price_formula_default,
     // users
     get_me_default,
     get_user_default,
