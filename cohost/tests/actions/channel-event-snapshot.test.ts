@@ -89,3 +89,11 @@ test("mappingLabels: event + per-ticket lookups with kind", async () => {
   ]);
   expect(r.mappings).toEqual({ event: [m], tickets: { t1: [], t2: [m] } });
 });
+
+test("no mappingLabels: zero RMS requests even with tickets", async () => {
+  const { ctx, calls } = mockCtx([ok([primary]), ok({ status: "live" }), ok([{ id: "t1" }]), ok({}), ok([])]);
+  const r = await run(input, ctx);
+  expect(calls).toHaveLength(5);
+  expect(calls.filter(c => /rms/.test(c.url))).toHaveLength(0);
+  expect(r.mappings).toEqual({ event: [], tickets: {} });
+});
