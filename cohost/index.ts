@@ -42,6 +42,8 @@ import listChannelEventListings from "./actions/list-channel-event-listings.ts";
 import setChannelEventVisibility from "./actions/set-channel-event-visibility.ts";
 import removeChannelEvent from "./actions/remove-channel-event.ts";
 import getChannelEvent from "./actions/get-channel-event.ts";
+import getChannelEventSnapshot from "./actions/get-channel-event-snapshot.ts";
+import registerUrnMappings from "./actions/register-urn-mappings.ts";
 import listChannelEventTickets from "./actions/list-channel-event-tickets.ts";
 import deleteEventTicket from "./actions/delete-event-ticket.ts";
 
@@ -173,6 +175,7 @@ export default {
     deleteChannel,
     listChannelEvents,
     getChannelEvent,
+    getChannelEventSnapshot,
     listChannelEventTickets,
     listChannelEventListings,
     setChannelEventVisibility,
@@ -193,6 +196,7 @@ export default {
     findMappedResources,
     resolveUrn,
     registerUrnMapping,
+    registerUrnMappings,
     syncObject,
     // formatting
     friendlyValue,
