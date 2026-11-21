@@ -106,3 +106,23 @@ test("no mappingLabels: zero RMS requests even with tickets", async () => {
   expect(calls.filter(c => /rms/.test(c.url))).toHaveLength(0);
   expect(r.mappings).toEqual({ event: [], tickets: {} });
 });
+
+test("owner tickets requested with status=all; removed ticket kept; channel-only id also looked up once", async () => {
+  const m = { urn: "u", labels: {}, meta: {} };
+  const { ctx, calls } = mockCtx([
+    ok([primary]), ok({ status: "live" }), ok([{ id: "t1", status: "removed" }, { id: "t2", status: "live" }]),
+    ok({}), ok([{ id: "t2" }, { id: "t3" }]),
+    ok([]), ok([m]), ok([]), ok([]),
+  ]);
+  const r = await run({ ...input, mappingLabels: { provider: "flite" } }, ctx);
+  expect(path(calls[2].url)).toBe("/v1/events/e1/tickets?status=all");
+  expect(r.tickets).toEqual([{ id: "t1", status: "removed" }, { id: "t2", status: "live" }]);
+  const urns = calls.filter(c => /rms\/urn\/search/.test(c.url)).map(c => new URL(c.url).searchParams.get("urn"));
+  expect(urns).toEqual([
+    "urn:1:co_1:cohost-falcon:/events/e1",
+    "urn:1:co_1:cohost-falcon:/events/e1/tickets/t1",
+    "urn:1:co_1:cohost-falcon:/events/e1/tickets/t2",
+    "urn:1:co_1:cohost-falcon:/events/e1/tickets/t3",
+  ]);
+  expect(Object.keys(r.mappings.tickets)).toEqual(["t1", "t2", "t3"]);
+});

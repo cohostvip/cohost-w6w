@@ -102,7 +102,9 @@ const getChannelEventSnapshot: ActionDefinition<SnapshotInput> = {
 
     // Owner reads are deliberately not caught: a 403/404 is the cross-company negative.
     const event = await client.request<Rec>(`/events/${encodeURIComponent(eventId)}`);
-    const tickets = await client.request<Rec[]>(`/events/${encodeURIComponent(eventId)}/tickets`);
+    const tickets = await client.request<Rec[]>(`/events/${encodeURIComponent(eventId)}/tickets`, {
+      query: { status: "all" }, // default is live only; removed/hidden/sold-out tickets must reach the snapshot
+    });
 
     let shown = true;
     let channelEvent: Rec | null = null;
@@ -128,8 +130,8 @@ const getChannelEventSnapshot: ActionDefinition<SnapshotInput> = {
           results: MappedResource[];
         }).results;
       mappings.event = await look(eventUrn, "event");
-      for (const t of tickets) {
-        const id = String(t.id);
+      const ids = new Set([...tickets, ...channelTickets].map(t => String(t.id)));
+      for (const id of ids) {
         mappings.tickets[id] = await look(`${eventUrn}/tickets/${id}`, "ticket");
       }
     }
