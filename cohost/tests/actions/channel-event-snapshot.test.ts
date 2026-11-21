@@ -38,6 +38,15 @@ test("listing selection: unmatched id → primary; none → null", async () => {
   expect(await pick([extra, primary], "zzz")).toEqual(primary);
   expect(await pick([primary, extra])).toEqual(primary);
   expect(await pick([])).toBeNull();
+  // M5: no listingId returns primary even when listings[0] is non-primary
+  expect(await pick([extra, primary])).toEqual(primary);
+});
+
+test("listing selection: id match among 3 (requested second, primary third)", async () => {
+  const l3 = { listingId: "l3", properties: {} };
+  const { ctx } = mockCtx([ok([extra, l3, primary]), ok({ status: "live" }), ok([]), ok({}), ok([])]);
+  const r = await run({ ...input, listingId: "l3" }, ctx);
+  expect(r.listing).toEqual(l3);
 });
 
 test("started ∧ ¬shown: visibility found on page 2 (hidden)", async () => {
