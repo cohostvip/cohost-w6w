@@ -1,4 +1,4 @@
-import type { ActionDefinition, HookContext } from "@w6w/types";
+import type { ActionDefinition, HookContext, Param } from "@w6w/types";
 import { channelPath } from "../lib/channels.ts";
 import { fetchChannelEvent, fetchChannelEventTickets, isCohostNotFound } from "../lib/channel-event.ts";
 import { CohostClient } from "../lib/client.ts";
@@ -7,7 +7,7 @@ import findMappedResources from "./find-mapped-resources.ts";
 export interface SnapshotInput {
   channelId: string;
   eventId: string;
-  companyId: string;
+  companyId?: string;
   listingId?: string;
   mappingLabels?: Record<string, unknown>;
 }
@@ -31,6 +31,13 @@ export interface ChannelEventSnapshot {
 }
 
 const PAGE = 100;
+
+/** Hidden: the account's own company (const), exactly as the Eventbrite transformer does it. */
+const companyIdParam: Param & { hidden: boolean } = {
+  key: "companyId", label: "Company ID", type: "string", required: true, hidden: true,
+  default: "{{ const.account_id }}",
+  hint: "The account's company; the owner event's own company wins when it reports one.",
+};
 
 type Rec = Record<string, unknown>;
 
@@ -64,7 +71,7 @@ const getChannelEventSnapshot: ActionDefinition<SnapshotInput> = {
   params: [
     { key: "channelId", label: "Channel ID", type: "string", required: true },
     { key: "eventId", label: "Event ID", type: "string", required: true },
-    { key: "companyId", label: "Company ID", type: "string", required: true },
+    companyIdParam,
     { key: "listingId", label: "Listing ID", type: "string", required: false },
     {
       key: "mappingLabels", label: "Mapping labels", type: "json", required: false,
@@ -88,8 +95,6 @@ const getChannelEventSnapshot: ActionDefinition<SnapshotInput> = {
   async execute(input, ctx): Promise<ChannelEventSnapshot> {
     const channelId = input.channelId.trim();
     const eventId = input.eventId.trim();
-    const companyId = input.companyId.trim();
-    const eventUrn = `urn:1:${companyId}:cohost-falcon:/events/${eventId}`;
     const client = new CohostClient(ctx);
     ctx.log("info", "reading channel event snapshot", { channelId, eventId });
 
@@ -102,6 +107,11 @@ const getChannelEventSnapshot: ActionDefinition<SnapshotInput> = {
 
     // Owner reads are deliberately not caught: a 403/404 is the cross-company negative.
     const event = await client.request<Rec>(`/events/${encodeURIComponent(eventId)}`);
+    // URNs are named under the company that owns the event (a channel may sell another organizer's event).
+    const owner = typeof event.companyId === "string" && event.companyId.trim() ? event.companyId.trim() : undefined;
+    const companyId = owner ?? (typeof input.companyId === "string" ? input.companyId.trim() : "");
+    if (!companyId) throw new Error("companyId is required (the account's company) when the event reports none");
+    const eventUrn = `urn:1:${companyId}:cohost-falcon:/events/${eventId}`;
     const tickets = await client.request<Rec[]>(`/events/${encodeURIComponent(eventId)}/tickets`, {
       query: { status: "all" }, // default is live only; removed/hidden/sold-out tickets must reach the snapshot
     });

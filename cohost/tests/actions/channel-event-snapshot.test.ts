@@ -126,3 +126,20 @@ test("owner tickets requested with status=all; removed ticket kept; channel-only
   ]);
   expect(Object.keys(r.mappings.tickets)).toEqual(["t1", "t2", "t3"]);
 });
+
+test("companyId is a hidden param defaulting to the account const (never a field to fill)", () => {
+  const p = action.params!.find(x => x.key === "companyId") as unknown as Record<string, unknown>;
+  expect(p).toMatchObject({ hidden: true, default: "{{ const.account_id }}", required: true });
+});
+
+test("URNs are named under the owner event's company when it reports one", async () => {
+  const { ctx } = mockCtx([ok([primary]), ok({ id: "e1", status: "live", companyId: "co_owner" }), ok([]), ok({}), ok([])]);
+  const r = await run(input, ctx);
+  expect(r.companyId).toBe("co_owner");
+  expect(r.eventUrn).toBe("urn:1:co_owner:cohost-falcon:/events/e1");
+});
+
+test("no companyId anywhere fails instead of naming a URN under an empty company", async () => {
+  const { ctx } = mockCtx([ok([primary]), ok({ id: "e1", status: "live" }), ok([]), ok({}), ok([])]);
+  await expect(run({ channelId: "ch1", eventId: "e1" }, ctx)).rejects.toThrow(/companyId/);
+});
