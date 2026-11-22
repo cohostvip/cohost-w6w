@@ -6,6 +6,7 @@ import orderChanged from "./triggers/order-changed.ts";
 import orderConfirmationRequested from "./triggers/order-confirmation-requested.ts";
 import eventChanged from "./triggers/event-changed.ts";
 import ticketChanged from "./triggers/ticket-changed.ts";
+import channelTicketChanged from "./triggers/channel-ticket-changed.ts";
 import attendeeChanged from "./triggers/attendee-changed.ts";
 import objectChanged from "./triggers/object-changed.ts";
 import channelEventChanged from "./triggers/channel-event-changed.ts";
@@ -211,6 +212,7 @@ export default {
     attendeeChanged,
     objectChanged,
     channelEventChanged,
+    channelTicketChanged,
   ],
   auth: [tenant, apiToken],
 } satisfies AppDefinition;
