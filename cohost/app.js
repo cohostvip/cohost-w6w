@@ -612,16 +612,23 @@ var CHANNEL_LISTING_OUTPUT = [
 ];
 var CHANNEL_EVENT_OUTPUT = [
   ...EVENT_OUTPUT,
-  o("description", "Description on the channel"),
-  s("description.html", "Description on the channel (HTML)"),
-  a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)"),
+  a("contentBlocks", 'Content blocks (the "description" block holds the description on the channel)'),
   b("salesEnabled", "Ticket sales on (false while the organizer has paused them on the channel)")
 ];
 var CHANNEL_EVENT_SAMPLE = {
   ...EVENT_SAMPLE,
   name: "Friday Night Social \u2014 on Sample Channel",
-  description: { html: "<p>Live DJs, a welcome drink and a packed room.</p>" },
-  ticketPrices: ["USD,5500"],
+  contentBlocks: [
+    {
+      id: "details",
+      type: "richtext",
+      designation: "description",
+      title: "Details",
+      status: "live",
+      order: 1,
+      data: { content: { html: "<p>Live DJs, a welcome drink and a packed room.</p>" } }
+    }
+  ],
   salesEnabled: true
 };
 var CHANNEL_TICKET_OUTPUT = TICKET_OUTPUT.filter(
@@ -663,6 +670,28 @@ var OBJECT_CHANGED_SAMPLE = payloadSample(
   { id: ID.ticket },
   ["capacity"]
 );
+var CHANNEL_CHANGED_OUTPUT = [
+  ...payloadOutput("The channel listing (event.change) or the ticket (ticket.change)", []).map(
+    (f) => f.key === "action" ? { ...f, label: "Action (event.change | ticket.change)", enum: ["event.change", "ticket.change"] } : f.key === "type" ? { ...f, label: "Type (channelEvent | offering)" } : f.key === "id" ? { ...f, label: "Event ID (event.change) or ticket ID (ticket.change)" } : f
+  ),
+  s("meta.channelId", "Channel ID"),
+  s("meta.change", "What happened (listed|changed|unlisted|created|updated|deleted)"),
+  s("meta.ticketId", "Ticket ID (ticket.change only)"),
+  s("meta.listingId", "Listing ID (event.change only)"),
+  o("meta.properties", "Listing properties (event.change only)")
+];
+var CHANNEL_CHANGED_SAMPLE = {
+  ...payloadSample(
+    "channelEvent.changed",
+    `/channels/ch_sample/events/${ID.event}/listings/primary`,
+    CHANNEL_EVENT_SAMPLE,
+    [],
+    { channelId: "ch_sample", change: "changed", ticketId: null, listingId: "primary", properties: { eventbriteId: "1234567890" } }
+  ),
+  action: "event.change",
+  type: "channelEvent",
+  id: ID.event
+};
 
 // lib/payload.ts
 async function fetchObject(client, type, id, eventId) {
@@ -841,110 +870,6 @@ var ticketChanged = {
 };
 var ticket_changed_default = ticketChanged;
 
-// triggers/attendee-changed.ts
-var ACTIONS3 = ["created", "checked_in", "deleted"];
-var DEFAULT_ACTIONS2 = ["created"];
-var attendeeChanged = {
-  key: "attendee-changed",
-  title: "Attendee Changed",
-  description: "Fires when a Cohost attendee is created (one per ticket on a placed order), checked in or deleted.",
-  params: [
-    {
-      key: "actions",
-      label: "Actions",
-      type: "multiselect",
-      hint: "Leave empty for Created only.",
-      default: [...DEFAULT_ACTIONS2],
-      options: [
-        { value: "created", label: "Created" },
-        { value: "checked_in", label: "Checked in" },
-        { value: "deleted", label: "Deleted" }
-      ]
-    }
-  ],
-  output: ATTENDEE_CHANGED_OUTPUT,
-  sample: ATTENDEE_CHANGED_SAMPLE,
-  async onSubscribe({ params, callbackUrl }, ctx) {
-    const events = pickValues("actions", params.actions, ACTIONS3, DEFAULT_ACTIONS2).map((a2) => `attendee.${a2}`);
-    return subscribeWebhook(ctx, "w6w: attendee changed", callbackUrl, events);
-  },
-  onUnsubscribe({ state }, ctx) {
-    return unsubscribeWebhook(ctx, state);
-  },
-  async handleIngest({ raw }, ctx) {
-    return [await toPayload(raw, ctx)];
-  }
-};
-var attendee_changed_default = attendeeChanged;
-
-// triggers/object-changed.ts
-var EVENTS = {
-  event: ["created", "updated", "deleted", "published"],
-  offering: ["created", "updated", "deleted"],
-  order: ["created", "updated", "placed", "refunded"],
-  attendee: ["created", "deleted", "checked_in"]
-};
-var TYPES = Object.keys(EVENTS);
-var ACTIONS4 = [...new Set(Object.values(EVENTS).flat())];
-var DEFAULT_ACTIONS3 = ["created", "updated", "deleted"];
-function webhookEvents(params) {
-  const types = pickValues("types", params.types, TYPES, TYPES);
-  const actions = pickValues("actions", params.actions, ACTIONS4, DEFAULT_ACTIONS3);
-  const events = types.flatMap((t) => actions.filter((a2) => EVENTS[t].includes(a2)).map((a2) => `${t}.${a2}`));
-  if (events.length === 0) {
-    throw new TypeError(`Cohost emits none of ${actions.join(", ")} for ${types.join(", ")}.`);
-  }
-  return events;
-}
-var objectChanged = {
-  key: "object-changed",
-  title: "Object Changed",
-  description: "Fires when a Cohost event, ticket, order or attendee changes.",
-  params: [
-    {
-      key: "types",
-      label: "Types",
-      type: "multiselect",
-      hint: "Leave empty for all.",
-      default: [...TYPES],
-      options: [
-        { value: "event", label: "Event" },
-        { value: "offering", label: "Ticket (offering)" },
-        { value: "order", label: "Order" },
-        { value: "attendee", label: "Attendee" }
-      ]
-    },
-    {
-      key: "actions",
-      label: "Actions",
-      type: "multiselect",
-      hint: "Leave empty for created, updated and deleted.",
-      default: [...DEFAULT_ACTIONS3],
-      options: [
-        { value: "created", label: "Created" },
-        { value: "updated", label: "Updated" },
-        { value: "deleted", label: "Deleted" },
-        { value: "published", label: "Published (events)" },
-        { value: "placed", label: "Placed (orders)" },
-        { value: "refunded", label: "Refunded (orders)" },
-        { value: "checked_in", label: "Checked in (attendees)" }
-      ]
-    }
-  ],
-  output: OBJECT_CHANGED_OUTPUT,
-  sample: OBJECT_CHANGED_SAMPLE,
-  async onSubscribe({ params, callbackUrl }, ctx) {
-    return subscribeWebhook(ctx, "w6w: object changed", callbackUrl, webhookEvents(params));
-  },
-  onUnsubscribe({ state }, ctx) {
-    return unsubscribeWebhook(ctx, state);
-  },
-  async handleIngest({ raw }, ctx) {
-    return [await toPayload(raw, ctx)];
-  }
-};
-var object_changed_default = objectChanged;
-
 // lib/channel-event.ts
 function fetchChannelEvent(ctx, ref) {
   return new CohostClient(ctx).request(`/events/${encodeURIComponent(ref.eventId)}`, {
@@ -968,9 +893,69 @@ function notShownOnChannel(ref) {
   );
 }
 
+// lib/channels.ts
+var CHANNEL_TYPES = ["website", "social", "promoter", "affiliate", "api", "seller", "other"];
+var CHANNEL_TYPE_OPTIONS = CHANNEL_TYPES.map((value) => ({
+  value,
+  label: value[0].toUpperCase() + value.slice(1)
+}));
+var MAX_CHANNEL_OPTIONS = 1e3;
+var channelIdParam = (extra = {}) => ({
+  key: "channelId",
+  label: "Channel",
+  type: "string",
+  options: { source: "resolveFields" },
+  config: { allowCustom: true },
+  ...extra
+});
+var channelOptions = (channels) => {
+  const rows = Array.isArray(channels) ? channels : Array.isArray(channels?.results) ? channels.results : [];
+  return rows.filter((c) => typeof c === "object" && c !== null && typeof c.id === "string").map((c) => {
+    const id = c.id;
+    const name = typeof c.name === "string" && c.name.trim() ? c.name.trim() : id;
+    const inactive = c.status === "inactive";
+    const detail = [typeof c.type === "string" ? c.type : "", inactive ? "inactive" : "", id].filter(Boolean);
+    return { option: { value: id, label: name, description: detail.join(" \xB7 ") }, inactive };
+  }).sort((a2, b2) => Number(a2.inactive) - Number(b2.inactive) || a2.option.label.localeCompare(b2.option.label)).slice(0, MAX_CHANNEL_OPTIONS).map(({ option }) => option);
+};
+var resolveChannelFields = async (input, ctx) => {
+  if (!input.fields.includes("channelId")) return { fields: {} };
+  try {
+    const channels = await new CohostClient(ctx).request("/company/sales-channels");
+    return { fields: { channelId: { options: channelOptions(channels) } } };
+  } catch (error) {
+    return { fields: { channelId: { error: error instanceof Error ? error.message : String(error) } } };
+  }
+};
+var channelPath = (channelId, ...rest) => ["/company/sales-channels", channelId, ...rest].map((part, i) => i === 0 ? part : encodeURIComponent(part.trim())).join("/");
+var DEFAULT_PRICING_PARAMS = [
+  {
+    key: "pricingFormulaId",
+    label: "Default price formula ID",
+    type: "string",
+    hint: "Optional. Prices your own events' listings on the channel that set no formula or markup of their own. Replaces the default markup."
+  },
+  {
+    key: "pricingMarkupPercent",
+    label: "Default markup %",
+    type: "number",
+    hint: "Optional. Used when no default price formula is given; 0 means no default."
+  }
+];
+var defaultPricingOf = (input) => {
+  const formulaId = input.pricingFormulaId?.trim();
+  if (formulaId) return { formulaId };
+  if (input.pricingMarkupPercent === void 0 || input.pricingMarkupPercent === "") return void 0;
+  const markupPercent = Number(input.pricingMarkupPercent);
+  if (!Number.isFinite(markupPercent) || markupPercent < 0 || markupPercent > 1e3) {
+    throw new Error("Default markup % must be a number from 0 to 1000");
+  }
+  return markupPercent === 0 ? null : { markupPercent };
+};
+
 // triggers/channel-event-changed.ts
-var ACTIONS5 = ["listed", "changed", "unlisted"];
-var DEFAULT_ACTIONS4 = ["listed", "changed", "unlisted"];
+var ACTIONS3 = ["listed", "changed", "unlisted"];
+var DEFAULT_ACTIONS2 = ["listed", "changed", "unlisted"];
 function parseListingPath(resourcePath) {
   const [channels, channelId, events, eventId, listings, listingId, ...rest] = resourcePath.split("/").filter(Boolean);
   if (channels !== "channels" || events !== "events" || listings !== "listings" || rest.length > 0) return null;
@@ -986,18 +971,13 @@ var channelEventChanged = {
   title: "Channel Event Changed",
   description: "Fires when an event is listed on, changes on, or is unlisted from one of your sales channels.",
   params: [
-    {
-      key: "channelId",
-      label: "Channel ID",
-      type: "string",
-      hint: "Only this channel's listings. Leave empty for all of your channels."
-    },
+    channelIdParam({ hint: "Only this channel's listings. Leave empty for all of your channels." }),
     {
       key: "actions",
       label: "Actions",
       type: "multiselect",
       hint: "Leave empty for all.",
-      default: [...DEFAULT_ACTIONS4],
+      default: [...DEFAULT_ACTIONS2],
       options: [
         { value: "listed", label: "Listed" },
         { value: "changed", label: "Changed" },
@@ -1007,8 +987,11 @@ var channelEventChanged = {
   ],
   output: CHANNEL_EVENT_CHANGED_OUTPUT,
   sample: CHANNEL_EVENT_CHANGED_SAMPLE,
+  // The Channel picker. Declared the way an Action declares it; w6w runs it once it serves
+  // trigger forms too (see `TriggerDefinition.resolveFields`).
+  resolveFields: resolveChannelFields,
   async onSubscribe({ params, callbackUrl }, ctx) {
-    const events = pickValues("actions", params.actions, ACTIONS5, DEFAULT_ACTIONS4).map((a2) => `channelEvent.${a2}`);
+    const events = pickValues("actions", params.actions, ACTIONS3, DEFAULT_ACTIONS2).map((a2) => `channelEvent.${a2}`);
     return subscribeWebhook(ctx, "w6w: channel event changed", callbackUrl, events);
   },
   onUnsubscribe({ state }, ctx) {
@@ -1049,6 +1032,216 @@ var channelEventChanged = {
   }
 };
 var channel_event_changed_default = channelEventChanged;
+
+// triggers/channel-changed.ts
+var ACTIONS4 = ["event.change", "ticket.change"];
+function eventIdOf(resourcePath) {
+  const [events, eventId] = resourcePath.split("/").filter(Boolean);
+  if (events !== "events" || !eventId) return null;
+  try {
+    return decodeURIComponent(eventId);
+  } catch {
+    return null;
+  }
+}
+var channelChanged = {
+  key: "channel-changed",
+  title: "Channel Changed",
+  description: "Fires when something changes on one of your sales channels: an event is listed, changed or unlisted (event.change), or a ticket of a listed event changes (ticket.change).",
+  params: [
+    channelIdParam({ required: true, hint: "Only changes on this channel." }),
+    {
+      key: "actions",
+      label: "Actions",
+      type: "multiselect",
+      hint: "Leave empty for all.",
+      default: [...ACTIONS4],
+      options: [
+        { value: "event.change", label: "Event change" },
+        { value: "ticket.change", label: "Ticket change" }
+      ]
+    }
+  ],
+  output: CHANNEL_CHANGED_OUTPUT,
+  sample: CHANNEL_CHANGED_SAMPLE,
+  resolveFields: resolveChannelFields,
+  async onSubscribe({ params, callbackUrl }, ctx) {
+    if (typeof params.channelId !== "string" || !params.channelId.trim()) {
+      throw new Error("channelId: required \u2014 pick the sales channel to watch");
+    }
+    const picked = pickValues("actions", params.actions, ACTIONS4, ACTIONS4);
+    const events = [
+      ...picked.includes("event.change") ? ["listed", "changed", "unlisted"].map((a2) => `channelEvent.${a2}`) : [],
+      ...picked.includes("ticket.change") ? ["created", "updated", "deleted"].map((a2) => `offering.${a2}`) : []
+    ];
+    return subscribeWebhook(ctx, "w6w: channel changed", callbackUrl, events);
+  },
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
+  },
+  async handleIngest({ raw, params }, ctx) {
+    const channelId = typeof params.channelId === "string" ? params.channelId.trim() : "";
+    if (!channelId) throw new Error("channelId: required");
+    const ping = pingOf(raw);
+    const change = ping.action.slice(ping.action.indexOf(".") + 1);
+    if (ping.action.startsWith("channelEvent.")) {
+      const listing = parseListingPath(ping.context.resourcePath);
+      if (!listing || listing.channelId !== channelId) return [];
+      let data = null;
+      if (ping.action !== "channelEvent.unlisted") {
+        try {
+          data = await fetchChannelEvent(ctx, listing);
+        } catch (error) {
+          if (!isCohostNotFound(error)) throw error;
+        }
+      }
+      return [{
+        urn: ping.urn,
+        action: "event.change",
+        type: "channelEvent",
+        id: listing.eventId,
+        timestamp: ping.timestamp,
+        data: data ?? null,
+        meta: {
+          changedFields: ping.data?.changedFields ?? [],
+          companyId: ping.context.companyId,
+          eventId: listing.eventId,
+          resourcePath: ping.context.resourcePath,
+          deliveryId: ping.id,
+          channelId,
+          change,
+          listingId: listing.listingId,
+          properties: ping.data?.properties ?? {}
+        }
+      }];
+    }
+    if (ping.action.startsWith("offering.")) {
+      const eventId = eventIdOf(ping.context.resourcePath);
+      if (!eventId) return [];
+      let listed;
+      try {
+        const rows = await new CohostClient(ctx).request(channelPath(channelId, "events", eventId, "listings"));
+        listed = Array.isArray(rows) && rows.length > 0;
+      } catch (error) {
+        if (!isCohostNotFound(error)) throw error;
+        listed = false;
+      }
+      if (!listed) return [];
+      const payload = await toPayload(raw, ctx);
+      return [{
+        ...payload,
+        action: "ticket.change",
+        meta: { ...payload.meta, channelId, eventId, change, ticketId: payload.id }
+      }];
+    }
+    return [];
+  }
+};
+var channel_changed_default = channelChanged;
+
+// triggers/attendee-changed.ts
+var ACTIONS5 = ["created", "checked_in", "deleted"];
+var DEFAULT_ACTIONS3 = ["created"];
+var attendeeChanged = {
+  key: "attendee-changed",
+  title: "Attendee Changed",
+  description: "Fires when a Cohost attendee is created (one per ticket on a placed order), checked in or deleted.",
+  params: [
+    {
+      key: "actions",
+      label: "Actions",
+      type: "multiselect",
+      hint: "Leave empty for Created only.",
+      default: [...DEFAULT_ACTIONS3],
+      options: [
+        { value: "created", label: "Created" },
+        { value: "checked_in", label: "Checked in" },
+        { value: "deleted", label: "Deleted" }
+      ]
+    }
+  ],
+  output: ATTENDEE_CHANGED_OUTPUT,
+  sample: ATTENDEE_CHANGED_SAMPLE,
+  async onSubscribe({ params, callbackUrl }, ctx) {
+    const events = pickValues("actions", params.actions, ACTIONS5, DEFAULT_ACTIONS3).map((a2) => `attendee.${a2}`);
+    return subscribeWebhook(ctx, "w6w: attendee changed", callbackUrl, events);
+  },
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
+  },
+  async handleIngest({ raw }, ctx) {
+    return [await toPayload(raw, ctx)];
+  }
+};
+var attendee_changed_default = attendeeChanged;
+
+// triggers/object-changed.ts
+var EVENTS = {
+  event: ["created", "updated", "deleted", "published"],
+  offering: ["created", "updated", "deleted"],
+  order: ["created", "updated", "placed", "refunded"],
+  attendee: ["created", "deleted", "checked_in"]
+};
+var TYPES = Object.keys(EVENTS);
+var ACTIONS6 = [...new Set(Object.values(EVENTS).flat())];
+var DEFAULT_ACTIONS4 = ["created", "updated", "deleted"];
+function webhookEvents(params) {
+  const types = pickValues("types", params.types, TYPES, TYPES);
+  const actions = pickValues("actions", params.actions, ACTIONS6, DEFAULT_ACTIONS4);
+  const events = types.flatMap((t) => actions.filter((a2) => EVENTS[t].includes(a2)).map((a2) => `${t}.${a2}`));
+  if (events.length === 0) {
+    throw new TypeError(`Cohost emits none of ${actions.join(", ")} for ${types.join(", ")}.`);
+  }
+  return events;
+}
+var objectChanged = {
+  key: "object-changed",
+  title: "Object Changed",
+  description: "Fires when a Cohost event, ticket, order or attendee changes.",
+  params: [
+    {
+      key: "types",
+      label: "Types",
+      type: "multiselect",
+      hint: "Leave empty for all.",
+      default: [...TYPES],
+      options: [
+        { value: "event", label: "Event" },
+        { value: "offering", label: "Ticket (offering)" },
+        { value: "order", label: "Order" },
+        { value: "attendee", label: "Attendee" }
+      ]
+    },
+    {
+      key: "actions",
+      label: "Actions",
+      type: "multiselect",
+      hint: "Leave empty for created, updated and deleted.",
+      default: [...DEFAULT_ACTIONS4],
+      options: [
+        { value: "created", label: "Created" },
+        { value: "updated", label: "Updated" },
+        { value: "deleted", label: "Deleted" },
+        { value: "published", label: "Published (events)" },
+        { value: "placed", label: "Placed (orders)" },
+        { value: "refunded", label: "Refunded (orders)" },
+        { value: "checked_in", label: "Checked in (attendees)" }
+      ]
+    }
+  ],
+  output: OBJECT_CHANGED_OUTPUT,
+  sample: OBJECT_CHANGED_SAMPLE,
+  async onSubscribe({ params, callbackUrl }, ctx) {
+    return subscribeWebhook(ctx, "w6w: object changed", callbackUrl, webhookEvents(params));
+  },
+  onUnsubscribe({ state }, ctx) {
+    return unsubscribeWebhook(ctx, state);
+  },
+  async handleIngest({ raw }, ctx) {
+    return [await toPayload(raw, ctx)];
+  }
+};
+var object_changed_default = objectChanged;
 
 // lib/params.ts
 var paginationParams = [
@@ -1478,7 +1671,7 @@ var setChannelListingProperties = {
   description: "Set the values your sales channel keeps on an event's listing \u2014 e.g. the id an integration published it under.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "eventId", label: "Event ID", type: "string", required: true },
     {
       key: "properties",
@@ -1502,6 +1695,7 @@ var setChannelListingProperties = {
     { key: "slug", type: "string", label: "Listing slug" },
     { key: "properties", type: "object", label: "The listing's properties after the write" }
   ],
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const listingId = input.listingId?.trim() || "primary";
     if (!input.properties || typeof input.properties !== "object" || Array.isArray(input.properties)) {
@@ -1536,7 +1730,7 @@ var assignPriceFormula = {
   description: "Price an event's tickets on a sales channel by one of your price formulas.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true },
     {
       key: "formulaId",
@@ -1567,6 +1761,7 @@ var assignPriceFormula = {
     { key: "pricing.prices", type: "object", label: "Ticket ID \u2192 own channel price" },
     { key: "pricing.markupPercent", type: "number", label: "Markup %" }
   ],
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const eventId = resourceId(input.event.trim(), "events");
     const channelId = input.channelId.trim();
@@ -1868,38 +2063,6 @@ var updatePriceFormula = {
 };
 var update_price_formula_default = updatePriceFormula;
 
-// lib/channels.ts
-var CHANNEL_TYPES = ["website", "social", "promoter", "affiliate", "api", "seller", "other"];
-var CHANNEL_TYPE_OPTIONS = CHANNEL_TYPES.map((value) => ({
-  value,
-  label: value[0].toUpperCase() + value.slice(1)
-}));
-var channelPath = (channelId, ...rest) => ["/company/sales-channels", channelId, ...rest].map((part, i) => i === 0 ? part : encodeURIComponent(part.trim())).join("/");
-var DEFAULT_PRICING_PARAMS = [
-  {
-    key: "pricingFormulaId",
-    label: "Default price formula ID",
-    type: "string",
-    hint: "Optional. Prices your own events' listings on the channel that set no formula or markup of their own. Replaces the default markup."
-  },
-  {
-    key: "pricingMarkupPercent",
-    label: "Default markup %",
-    type: "number",
-    hint: "Optional. Used when no default price formula is given; 0 means no default."
-  }
-];
-var defaultPricingOf = (input) => {
-  const formulaId = input.pricingFormulaId?.trim();
-  if (formulaId) return { formulaId };
-  if (input.pricingMarkupPercent === void 0 || input.pricingMarkupPercent === "") return void 0;
-  const markupPercent = Number(input.pricingMarkupPercent);
-  if (!Number.isFinite(markupPercent) || markupPercent < 0 || markupPercent > 1e3) {
-    throw new Error("Default markup % must be a number from 0 to 1000");
-  }
-  return markupPercent === 0 ? null : { markupPercent };
-};
-
 // actions/list-channels.ts
 var OUTPUT2 = [{ key: "results", type: "array", label: "Channels", items: CHANNEL_OUTPUT }];
 var listChannels = {
@@ -1935,8 +2098,9 @@ var getChannel = {
   resource: "channel",
   title: "Get Channel",
   description: "Fetch one of your sales channels by id.",
-  params: [{ key: "channelId", label: "Channel ID", type: "string", required: true }],
+  params: [channelIdParam({ required: true })],
   output: CHANNEL_OUTPUT,
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     ctx.log("info", "fetching channel", { channelId: input.channelId });
     return new CohostClient(ctx).request(channelPath(input.channelId));
@@ -1994,7 +2158,7 @@ var updateChannel = {
   description: "Change one of your sales channels; only the fields you fill in change.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "name", label: "Name", type: "string" },
     { key: "description", label: "Description", type: "text" },
     {
@@ -2027,6 +2191,7 @@ var updateChannel = {
     }
   ],
   output: CHANNEL_OUTPUT,
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const extra = input.changes && typeof input.changes === "object" && !Array.isArray(input.changes) ? input.changes : {};
     const channel = { ...extra };
@@ -2051,11 +2216,12 @@ var deleteChannel = {
   title: "Delete Channel",
   description: "Delete one of your sales channels.",
   idempotent: true,
-  params: [{ key: "channelId", label: "Channel ID", type: "string", required: true }],
+  params: [channelIdParam({ required: true })],
   output: [
     { key: "deleted", type: "boolean", label: "Deleted" },
     { key: "id", type: "string", label: "Channel ID" }
   ],
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     ctx.log("info", "deleting channel", { channelId: input.channelId });
     await new CohostClient(ctx).request(channelPath(input.channelId), { method: "DELETE" });
@@ -2076,7 +2242,7 @@ var listChannelEvents = {
   title: "List Channel Events",
   description: "List the events listed on one of your sales channels.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "status", label: "Event status", type: "string", hint: "Optional, comma-separated, e.g. live,ended." },
     {
       key: "activeAt",
@@ -2106,6 +2272,7 @@ var listChannelEvents = {
     { key: "offset", label: "Offset", type: "number", default: 0 }
   ],
   output: OUTPUT3,
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     ctx.log("info", "listing channel events", { channelId: input.channelId });
     const page = await new CohostClient(ctx).request(
@@ -2135,10 +2302,11 @@ var listChannelEventListings = {
   title: "List Channel Event Listings",
   description: "List an event's listings on one of your sales channels, with the properties your channel keeps on each.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true }
   ],
   output: OUTPUT4,
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const eventId = resourceId(input.event, "events");
     ctx.log("info", "listing channel event listings", { channelId: input.channelId, eventId });
@@ -2159,7 +2327,7 @@ var setChannelEventVisibility = {
   description: "Show or hide an event on one of your sales channels, without removing it.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true },
     {
       key: "visibility",
@@ -2181,6 +2349,7 @@ var setChannelEventVisibility = {
     { key: "tags", type: "array", label: "Listing tags" },
     { key: "meta", type: "object", label: "Listing meta" }
   ],
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const eventId = resourceId(input.event, "events");
     ctx.log("info", "setting channel event visibility", { channelId: input.channelId, eventId, visibility: input.visibility });
@@ -2201,7 +2370,7 @@ var removeChannelEvent = {
   description: "Take an event off one of your sales channels.",
   idempotent: false,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true }
   ],
   output: [
@@ -2209,6 +2378,7 @@ var removeChannelEvent = {
     { key: "eventId", type: "string", label: "Event ID" },
     { key: "channelId", type: "string", label: "Channel ID" }
   ],
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const eventId = resourceId(input.event, "events");
     ctx.log("info", "removing event from channel", { channelId: input.channelId, eventId });
@@ -2228,9 +2398,9 @@ var getChannelEvent = {
   type: "read",
   resource: "channel",
   title: "Get Channel Event",
-  description: "Fetch an event as your sales channel shows it \u2014 its channel name, description, whether sales are on, and its tickets at channel prices.",
+  description: "Fetch an event as your sales channel shows it \u2014 its channel name, content blocks (with the description), whether sales are on, and its tickets at channel prices.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID, slug or URN)", type: "string", required: true },
     {
       key: "listingId",
@@ -2241,6 +2411,7 @@ var getChannelEvent = {
     }
   ],
   output: OUTPUT5,
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const ref = {
       channelId: input.channelId.trim(),
@@ -2262,8 +2433,281 @@ var getChannelEvent = {
 };
 var get_channel_event_default = getChannelEvent;
 
+// actions/find-mapped-resources.ts
+var RESOURCE_FIELDS = [
+  { key: "urn", type: "string", label: "URN" },
+  { key: "labels", type: "object", label: "Labels" },
+  { key: "labels.id", type: "string", label: "Provider ID" },
+  { key: "labels.name", type: "string", label: "Name" },
+  { key: "labels.source", type: "string", label: "Source (eventbrite, \u2026)" },
+  { key: "labels.category", type: "string", label: "Category (ticket, event, \u2026)" },
+  { key: "labels.eventId", type: "string", label: "Provider event ID" },
+  { key: "meta", type: "object", label: "Meta" },
+  { key: "meta.implementation", type: "object", label: "Connection app" },
+  { key: "meta.implementation.id", type: "string", label: "Connection app ID (eventbrite@1.0.0, \u2026)" },
+  { key: "meta.implementation.name", type: "string", label: "Connection app name" }
+];
+var OUTPUT6 = [{ key: "results", type: "array", label: "Mapped resources", items: RESOURCE_FIELDS }];
+var findMappedResources = {
+  key: "find-mapped-resources",
+  type: "read",
+  resource: "urn",
+  title: "Find Mapped Resources",
+  description: "List every resource mapped to a Cohost URN, e.g. the Eventbrite ticket classes linked to a ticket.",
+  params: [
+    {
+      key: "urn",
+      label: "URN",
+      type: "string",
+      required: true,
+      hint: "e.g. urn:1:<company>:cohost-falcon:/events/<eventId>/tickets/<ticketId> \u2014 a change trigger's urn."
+    },
+    {
+      key: "labels",
+      label: "Label filters",
+      type: "json",
+      required: false,
+      hint: "Optional JSON object with any label keys and values to match on mapped resources. All supplied labels must match; extra stored labels are allowed. Leave empty for no label filtering."
+    }
+  ],
+  output: OUTPUT6,
+  sample: {
+    results: [
+      {
+        urn: "urn:1:co_sample:conn_sample:/events/1000000001/ticket_classes/1000000005",
+        labels: {
+          id: "1000000005",
+          name: "General Admission",
+          source: "eventbrite",
+          category: "ticket",
+          eventId: "1000000001",
+          "-resource.connectionId": "conn_sample"
+        },
+        meta: {
+          implementation: { id: "eventbrite@1.0.0", name: "Eventbrite" }
+        }
+      }
+    ]
+  },
+  async execute(input, ctx) {
+    ctx.log("info", "finding mapped resources", { urn: input.urn });
+    const client = new CohostClient(ctx);
+    const results = await client.request("/rms/urn/search", {
+      query: { urn: input.urn, labels: input.labels === void 0 ? void 0 : JSON.stringify(input.labels) }
+    });
+    return { results };
+  }
+};
+var find_mapped_resources_default = findMappedResources;
+
+// actions/get-channel-event-snapshot.ts
+var PAGE = 100;
+var companyIdParam = {
+  key: "companyId",
+  label: "Company ID",
+  type: "string",
+  required: true,
+  hidden: true,
+  default: "{{ const.account_id }}",
+  hint: "The account's company; the owner event's own company wins when it reports one."
+};
+async function lookupVisibility(ctx, channelId, eventId) {
+  const client = new CohostClient(ctx);
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await client.request(channelPath(channelId, "events"), {
+      query: { status: "started", limit: PAGE, offset }
+    });
+    const p = page ?? {};
+    const items = Array.isArray(page) ? page : Array.isArray(p.items) ? p.items : Array.isArray(p.results) ? p.results : [];
+    const hit = items.find((i) => String(i.id) === eventId);
+    if (hit) {
+      const v = hit.listing?.visibility;
+      return typeof v === "string" ? v : null;
+    }
+    const total = typeof p.total === "number" ? p.total : p.pagination?.total;
+    if (items.length < PAGE || typeof total === "number" && offset + PAGE >= total) return null;
+  }
+}
+var getChannelEventSnapshot = {
+  key: "get-channel-event-snapshot",
+  type: "read",
+  resource: "channel",
+  title: "Get Channel Event Snapshot",
+  description: "Read an event on a sales channel in one call: the channel's view, the owner's inventory and any URN mappings.",
+  params: [
+    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    { key: "eventId", label: "Event ID", type: "string", required: true },
+    companyIdParam,
+    { key: "listingId", label: "Listing ID", type: "string", required: false },
+    {
+      key: "mappingLabels",
+      label: "Mapping labels",
+      type: "json",
+      required: false,
+      hint: "Label filters for the mapping lookups; without them no mappings are read."
+    }
+  ],
+  output: [
+    { key: "channelId", type: "string", label: "Channel ID" },
+    { key: "eventId", type: "string", label: "Event ID" },
+    { key: "companyId", type: "string", label: "Company ID" },
+    { key: "eventUrn", type: "string", label: "Event URN" },
+    { key: "listing", type: "object", label: "Listing" },
+    { key: "visibility", type: "string", label: "Visibility" },
+    { key: "shown", type: "boolean", label: "Shown on the channel" },
+    { key: "channelEvent", type: "object", label: "Channel view of the event" },
+    { key: "channelTickets", type: "array", label: "Channel view of the tickets" },
+    { key: "event", type: "object", label: "Owner event" },
+    { key: "tickets", type: "array", label: "Owner tickets" },
+    { key: "mappings", type: "object", label: "URN mappings (event, tickets by id)" }
+  ],
+  async execute(input, ctx) {
+    const channelId = input.channelId.trim();
+    const eventId = input.eventId.trim();
+    const client = new CohostClient(ctx);
+    ctx.log("info", "reading channel event snapshot", { channelId, eventId });
+    const listings = await client.request(channelPath(channelId, "events", eventId, "listings"));
+    const wanted = input.listingId?.trim();
+    const all = Array.isArray(listings) ? listings : [];
+    const listing = (wanted ? all.find((l) => l.listingId === wanted) : void 0) ?? all.find((l) => l.listingId === "primary") ?? null;
+    const event = await client.request(`/events/${encodeURIComponent(eventId)}`);
+    const owner = typeof event.companyId === "string" && event.companyId.trim() ? event.companyId.trim() : void 0;
+    const companyId = owner ?? (typeof input.companyId === "string" ? input.companyId.trim() : "");
+    if (!companyId) throw new Error("companyId is required (the account's company) when the event reports none");
+    const eventUrn = `urn:1:${companyId}:cohost-falcon:/events/${eventId}`;
+    const tickets = await client.request(`/events/${encodeURIComponent(eventId)}/tickets`, {
+      query: { status: "all" }
+      // default is live only; removed/hidden/sold-out tickets must reach the snapshot
+    });
+    let shown = true;
+    let channelEvent = null;
+    let channelTickets = [];
+    const ref = { channelId, eventId, listingId: wanted };
+    try {
+      const [ce, ct] = await Promise.all([fetchChannelEvent(ctx, ref), fetchChannelEventTickets(ctx, ref)]);
+      channelEvent = ce;
+      channelTickets = ct;
+    } catch (error) {
+      if (!isCohostNotFound(error)) throw error;
+      shown = false;
+    }
+    let visibility = null;
+    if (shown) visibility = "visible";
+    else if (event.status === "started") visibility = await lookupVisibility(ctx, channelId, eventId);
+    const mappings = { event: [], tickets: {} };
+    if (input.mappingLabels) {
+      const look = async (urn, kind) => (await find_mapped_resources_default.execute({ urn, labels: { ...input.mappingLabels, kind } }, ctx)).results;
+      mappings.event = await look(eventUrn, "event");
+      const ids = new Set([...tickets, ...channelTickets].map((t) => String(t.id)));
+      for (const id of ids) {
+        mappings.tickets[id] = await look(`${eventUrn}/tickets/${id}`, "ticket");
+      }
+    }
+    return { channelId, eventId, companyId, eventUrn, listing, visibility, shown, channelEvent, channelTickets, event, tickets, mappings };
+  }
+};
+var get_channel_event_snapshot_default = getChannelEventSnapshot;
+
+// actions/register-urn-mapping.ts
+var parse = (urn) => {
+  const match = /^urn:1:([^:\s/]+):([^:\s/]+):(\/[^\s?#]+)$/.exec(urn);
+  if (!match || match[3].slice(1).split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error("Expected urn:1:<company>:<service>:/<resource-path>.");
+  }
+  return { company: match[1], service: match[2], path: match[3] };
+};
+var registerUrnMapping = {
+  key: "register-urn-mapping",
+  type: "perform",
+  resource: "urn",
+  title: "Register URN Mapping",
+  description: "Map a Cohost resource to another resource, such as an Eventbrite event, with searchable labels.",
+  idempotent: true,
+  params: [
+    {
+      key: "urn",
+      label: "Cohost URN",
+      type: "string",
+      required: true,
+      hint: "The existing Cohost resource, e.g. urn:1:<company>:cohost-falcon:/events/<id>."
+    },
+    {
+      key: "mappedUrn",
+      label: "Mapped Resource URN",
+      type: "string",
+      required: true,
+      hint: "The resource you created, e.g. urn:1:<company>:conn_\u2026:/events/<eventbrite-id>."
+    },
+    {
+      key: "labels",
+      label: "Labels",
+      type: "json",
+      required: false,
+      hint: "Optional JSON object saved on the mapped resource. Find Mapped Resources can filter by these labels. Existing labels are merged; no labels are added by default."
+    }
+  ],
+  output: [
+    { key: "urn", type: "string", label: "Mapped Resource URN" },
+    { key: "labels", type: "object", label: "Labels" },
+    { key: "resourceUrns", type: "array", label: "Resource URNs" },
+    { key: "resources", type: "object", label: "Mapped Resources" }
+  ],
+  async execute(input, ctx) {
+    const local = parse(input.urn);
+    const mapped = parse(input.mappedUrn);
+    const internal = (service) => service === "cohost-falcon" || service === "cohost-puma";
+    if (!internal(local.service)) throw new Error("Cohost URN must use cohost-falcon or cohost-puma.");
+    if (local.company !== mapped.company) throw new Error("Both URNs must belong to the same company.");
+    if (internal(mapped.service) && local.path === mapped.path) throw new Error("Cannot map a resource to itself.");
+    if (input.labels !== void 0 && (input.labels === null || typeof input.labels !== "object" || Array.isArray(input.labels))) {
+      throw new Error("Labels must be a JSON object.");
+    }
+    const labels = input.labels ?? {};
+    ctx.log("info", "registering urn mapping", { urn: input.urn, mappedUrn: input.mappedUrn });
+    return new CohostClient(ctx).request("/rms/urn/mappings", {
+      method: "POST",
+      body: {
+        urn: input.mappedUrn,
+        labels,
+        resources: [{ ...labels, urn: input.mappedUrn }, { urn: input.urn }]
+      }
+    });
+  }
+};
+var register_urn_mapping_default = registerUrnMapping;
+
+// actions/register-urn-mappings.ts
+var registerUrnMappings = {
+  key: "register-urn-mappings",
+  type: "perform",
+  resource: "urn",
+  title: "Register URN Mappings",
+  description: "Register several URN mappings in order, each exactly as Register URN Mapping does.",
+  idempotent: true,
+  params: [
+    {
+      key: "mappings",
+      label: "Mappings",
+      type: "json",
+      required: true,
+      hint: "JSON array of { urn, mappedUrn, labels? } \u2014 the inputs of Register URN Mapping."
+    }
+  ],
+  output: [
+    { key: "count", type: "number", label: "Mappings registered" },
+    { key: "results", type: "array", label: "Results, one per mapping, in input order" }
+  ],
+  async execute(input, ctx) {
+    if (!Array.isArray(input.mappings)) throw new Error("Mappings must be a JSON array.");
+    const results = [];
+    for (const item of input.mappings) results.push(await register_urn_mapping_default.execute(item, ctx));
+    return { count: results.length, results };
+  }
+};
+var register_urn_mappings_default = registerUrnMappings;
+
 // actions/list-channel-event-tickets.ts
-var OUTPUT6 = [
+var OUTPUT7 = [
   { key: "results", type: "array", label: "Tickets on the channel", items: CHANNEL_TICKET_OUTPUT }
 ];
 var listChannelEventTickets = {
@@ -2273,7 +2717,7 @@ var listChannelEventTickets = {
   title: "List Channel Event Tickets",
   description: "List the tickets your sales channel sells for an event, at the channel's prices.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID, slug or URN)", type: "string", required: true },
     {
       key: "listingId",
@@ -2283,7 +2727,8 @@ var listChannelEventTickets = {
       hint: "primary, or an extra listing's id (meta.listingId on Channel Event Changed)."
     }
   ],
-  output: OUTPUT6,
+  output: OUTPUT7,
+  resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const ref = {
       channelId: input.channelId.trim(),
@@ -2882,73 +3327,6 @@ var listUsers = {
 };
 var list_users_default = listUsers;
 
-// actions/find-mapped-resources.ts
-var RESOURCE_FIELDS = [
-  { key: "urn", type: "string", label: "URN" },
-  { key: "labels", type: "object", label: "Labels" },
-  { key: "labels.id", type: "string", label: "Provider ID" },
-  { key: "labels.name", type: "string", label: "Name" },
-  { key: "labels.source", type: "string", label: "Source (eventbrite, \u2026)" },
-  { key: "labels.category", type: "string", label: "Category (ticket, event, \u2026)" },
-  { key: "labels.eventId", type: "string", label: "Provider event ID" },
-  { key: "meta", type: "object", label: "Meta" },
-  { key: "meta.implementation", type: "object", label: "Connection app" },
-  { key: "meta.implementation.id", type: "string", label: "Connection app ID (eventbrite@1.0.0, \u2026)" },
-  { key: "meta.implementation.name", type: "string", label: "Connection app name" }
-];
-var OUTPUT7 = [{ key: "results", type: "array", label: "Mapped resources", items: RESOURCE_FIELDS }];
-var findMappedResources = {
-  key: "find-mapped-resources",
-  type: "read",
-  resource: "urn",
-  title: "Find Mapped Resources",
-  description: "List every resource mapped to a Cohost URN, e.g. the Eventbrite ticket classes linked to a ticket.",
-  params: [
-    {
-      key: "urn",
-      label: "URN",
-      type: "string",
-      required: true,
-      hint: "e.g. urn:1:<company>:cohost-falcon:/events/<eventId>/tickets/<ticketId> \u2014 a change trigger's urn."
-    },
-    {
-      key: "labels",
-      label: "Label filters",
-      type: "json",
-      required: false,
-      hint: "Optional JSON object with any label keys and values to match on mapped resources. All supplied labels must match; extra stored labels are allowed. Leave empty for no label filtering."
-    }
-  ],
-  output: OUTPUT7,
-  sample: {
-    results: [
-      {
-        urn: "urn:1:co_sample:conn_sample:/events/1000000001/ticket_classes/1000000005",
-        labels: {
-          id: "1000000005",
-          name: "General Admission",
-          source: "eventbrite",
-          category: "ticket",
-          eventId: "1000000001",
-          "-resource.connectionId": "conn_sample"
-        },
-        meta: {
-          implementation: { id: "eventbrite@1.0.0", name: "Eventbrite" }
-        }
-      }
-    ]
-  },
-  async execute(input, ctx) {
-    ctx.log("info", "finding mapped resources", { urn: input.urn });
-    const client = new CohostClient(ctx);
-    const results = await client.request("/rms/urn/search", {
-      query: { urn: input.urn, labels: input.labels === void 0 ? void 0 : JSON.stringify(input.labels) }
-    });
-    return { results };
-  }
-};
-var find_mapped_resources_default = findMappedResources;
-
 // actions/resolve-urn.ts
 var OUTPUT8 = [
   { key: "urn", type: "string", label: "URN" },
@@ -2987,74 +3365,6 @@ var resolveUrn = {
   }
 };
 var resolve_urn_default = resolveUrn;
-
-// actions/register-urn-mapping.ts
-var parse = (urn) => {
-  const match = /^urn:1:([^:\s/]+):([^:\s/]+):(\/[^\s?#]+)$/.exec(urn);
-  if (!match || match[3].slice(1).split("/").some((part) => !part || part === "." || part === "..")) {
-    throw new Error("Expected urn:1:<company>:<service>:/<resource-path>.");
-  }
-  return { company: match[1], service: match[2], path: match[3] };
-};
-var registerUrnMapping = {
-  key: "register-urn-mapping",
-  type: "perform",
-  resource: "urn",
-  title: "Register URN Mapping",
-  description: "Map a Cohost resource to another resource, such as an Eventbrite event, with searchable labels.",
-  idempotent: true,
-  params: [
-    {
-      key: "urn",
-      label: "Cohost URN",
-      type: "string",
-      required: true,
-      hint: "The existing Cohost resource, e.g. urn:1:<company>:cohost-falcon:/events/<id>."
-    },
-    {
-      key: "mappedUrn",
-      label: "Mapped Resource URN",
-      type: "string",
-      required: true,
-      hint: "The resource you created, e.g. urn:1:<company>:conn_\u2026:/events/<eventbrite-id>."
-    },
-    {
-      key: "labels",
-      label: "Labels",
-      type: "json",
-      required: false,
-      hint: "Optional JSON object saved on the mapped resource. Find Mapped Resources can filter by these labels. Existing labels are merged; no labels are added by default."
-    }
-  ],
-  output: [
-    { key: "urn", type: "string", label: "Mapped Resource URN" },
-    { key: "labels", type: "object", label: "Labels" },
-    { key: "resourceUrns", type: "array", label: "Resource URNs" },
-    { key: "resources", type: "object", label: "Mapped Resources" }
-  ],
-  async execute(input, ctx) {
-    const local = parse(input.urn);
-    const mapped = parse(input.mappedUrn);
-    const internal = (service) => service === "cohost-falcon" || service === "cohost-puma";
-    if (!internal(local.service)) throw new Error("Cohost URN must use cohost-falcon or cohost-puma.");
-    if (local.company !== mapped.company) throw new Error("Both URNs must belong to the same company.");
-    if (internal(mapped.service) && local.path === mapped.path) throw new Error("Cannot map a resource to itself.");
-    if (input.labels !== void 0 && (input.labels === null || typeof input.labels !== "object" || Array.isArray(input.labels))) {
-      throw new Error("Labels must be a JSON object.");
-    }
-    const labels = input.labels ?? {};
-    ctx.log("info", "registering urn mapping", { urn: input.urn, mappedUrn: input.mappedUrn });
-    return new CohostClient(ctx).request("/rms/urn/mappings", {
-      method: "POST",
-      body: {
-        urn: input.mappedUrn,
-        labels,
-        resources: [{ ...labels, urn: input.mappedUrn }, { urn: input.urn }]
-      }
-    });
-  }
-};
-var register_urn_mapping_default = registerUrnMapping;
 
 // actions/sync-object.ts
 var TYPES2 = ["event", "ticket", "order"];
@@ -3476,6 +3786,7 @@ var index_default = {
     delete_channel_default,
     list_channel_events_default,
     get_channel_event_default,
+    get_channel_event_snapshot_default,
     list_channel_event_tickets_default,
     list_channel_event_listings_default,
     set_channel_event_visibility_default,
@@ -3496,6 +3807,7 @@ var index_default = {
     find_mapped_resources_default,
     resolve_urn_default,
     register_urn_mapping_default,
+    register_urn_mappings_default,
     sync_object_default,
     // formatting
     friendly_value_default,
@@ -3509,7 +3821,8 @@ var index_default = {
     ticket_changed_default,
     attendee_changed_default,
     object_changed_default,
-    channel_event_changed_default
+    channel_event_changed_default,
+    channel_changed_default
   ],
   auth: [tenant_default, api_token_default]
 };
