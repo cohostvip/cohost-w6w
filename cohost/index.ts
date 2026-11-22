@@ -6,6 +6,7 @@ import orderChanged from "./triggers/order-changed.ts";
 import orderConfirmationRequested from "./triggers/order-confirmation-requested.ts";
 import eventChanged from "./triggers/event-changed.ts";
 import ticketChanged from "./triggers/ticket-changed.ts";
+import channelChanged from "./triggers/channel-changed.ts";
 import attendeeChanged from "./triggers/attendee-changed.ts";
 import objectChanged from "./triggers/object-changed.ts";
 import channelEventChanged from "./triggers/channel-event-changed.ts";
@@ -42,6 +43,8 @@ import listChannelEventListings from "./actions/list-channel-event-listings.ts";
 import setChannelEventVisibility from "./actions/set-channel-event-visibility.ts";
 import removeChannelEvent from "./actions/remove-channel-event.ts";
 import getChannelEvent from "./actions/get-channel-event.ts";
+import getChannelEventSnapshot from "./actions/get-channel-event-snapshot.ts";
+import registerUrnMappings from "./actions/register-urn-mappings.ts";
 import listChannelEventTickets from "./actions/list-channel-event-tickets.ts";
 import deleteEventTicket from "./actions/delete-event-ticket.ts";
 
@@ -173,6 +176,7 @@ export default {
     deleteChannel,
     listChannelEvents,
     getChannelEvent,
+    getChannelEventSnapshot,
     listChannelEventTickets,
     listChannelEventListings,
     setChannelEventVisibility,
@@ -193,6 +197,7 @@ export default {
     findMappedResources,
     resolveUrn,
     registerUrnMapping,
+    registerUrnMappings,
     syncObject,
     // formatting
     friendlyValue,
@@ -207,6 +212,7 @@ export default {
     attendeeChanged,
     objectChanged,
     channelEventChanged,
+    channelChanged,
   ],
   auth: [tenant, apiToken],
 } satisfies AppDefinition;

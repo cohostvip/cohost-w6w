@@ -1,0 +1,145 @@
+import { expect, test } from "vitest";
+import action from "../../actions/get-channel-event-snapshot.ts";
+import type { ChannelEventSnapshot } from "../../actions/get-channel-event-snapshot.ts";
+import { mockCtx, type MockResponse } from "../_helpers.ts";
+
+const run = (i: Parameters<typeof action.execute>[0], ctx: Parameters<typeof action.execute>[1]) =>
+  action.execute(i, ctx) as Promise<ChannelEventSnapshot>;
+const input = { channelId: "ch1", eventId: "e1", companyId: "co_1" };
+const ok = (data: unknown): MockResponse => ({ body: { status: "ok", data } });
+const nf: MockResponse = { status: 404, statusText: "Not Found", body: "nope" };
+const path = (u: string) => new URL(u).pathname + new URL(u).search;
+const primary = { listingId: "primary", properties: {} };
+const extra = { listingId: "l2", properties: {} };
+
+// order: listings, owner event, owner tickets, channel event, channel tickets
+test("live ∧ shown: full view, zero list requests, listing by id match", async () => {
+  const { ctx, calls } = mockCtx([
+    ok([primary, extra]), ok({ id: "e1", status: "live" }), ok([{ id: "t1", capacity: 10, quantitySold: 3 }]),
+    ok({ name: "N" }), ok([{ id: "t1" }]),
+  ]);
+  const r = await run({ ...input, listingId: "l2" }, ctx);
+  expect(r).toMatchObject({
+    eventUrn: "urn:1:co_1:cohost-falcon:/events/e1", listing: extra, shown: true, visibility: "visible",
+    channelEvent: { name: "N" }, channelTickets: [{ id: "t1" }], tickets: [{ id: "t1", capacity: 10, quantitySold: 3 }],
+    mappings: { event: [], tickets: {} },
+  });
+  expect(calls).toHaveLength(5);
+  expect(calls.filter(c => /status=started/.test(c.url))).toHaveLength(0);
+  expect(calls.filter(c => /rms/.test(c.url))).toHaveLength(0);
+  expect(calls[3].headers["x-cohost-channel-id"]).toBe("ch1");
+});
+
+test("listing selection: unmatched id → primary; none → null", async () => {
+  const pick = async (listings: unknown[], listingId?: string) => {
+    const { ctx } = mockCtx([ok(listings), ok({ status: "live" }), ok([]), ok({}), ok([])]);
+    return (await run({ ...input, listingId }, ctx)).listing;
+  };
+  expect(await pick([extra, primary], "zzz")).toEqual(primary);
+  expect(await pick([primary, extra])).toEqual(primary);
+  expect(await pick([])).toBeNull();
+  // M5: no listingId returns primary even when listings[0] is non-primary
+  expect(await pick([extra, primary])).toEqual(primary);
+});
+
+test("listing selection: id match among 3 (requested second, primary third)", async () => {
+  const l3 = { listingId: "l3", properties: {} };
+  const { ctx } = mockCtx([ok([extra, l3, primary]), ok({ status: "live" }), ok([]), ok({}), ok([])]);
+  const r = await run({ ...input, listingId: "l3" }, ctx);
+  expect(r.listing).toEqual(l3);
+});
+
+test("started ∧ ¬shown: visibility found on page 2 (hidden)", async () => {
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `x${i}`, listing: { visibility: "visible" } }));
+  const { ctx, calls } = mockCtx([
+    ok([primary]), ok({ id: "e1", status: "started" }), ok([]), nf, nf,
+    ok({ items: page1, total: 101 }), ok({ items: [{ id: "e1", listing: { visibility: "hidden" } }], total: 101 }),
+  ]);
+  const r = await run(input, ctx);
+  expect(r).toMatchObject({ shown: false, channelEvent: null, channelTickets: [], visibility: "hidden" });
+  const lists = calls.filter(c => /status=started/.test(c.url));
+  expect(lists).toHaveLength(2);
+  expect(path(lists[0].url)).toContain("limit=100");
+  expect(path(lists[0].url)).toContain("offset=0");
+  expect(path(lists[1].url)).toContain("offset=100");
+});
+
+test("started ∧ ¬shown ∧ absent → visibility null", async () => {
+  const { ctx } = mockCtx([ok([primary]), ok({ status: "started" }), ok([]), nf, nf, ok({ items: [], total: 0 })]);
+  expect((await run(input, ctx)).visibility).toBeNull();
+});
+
+test("¬shown ∧ not started: visibility null, no lookup", async () => {
+  const { ctx, calls } = mockCtx([ok([primary]), ok({ status: "ended" }), ok([]), nf, nf]);
+  const r = await run(input, ctx);
+  expect(r).toMatchObject({ shown: false, visibility: null });
+  expect(calls).toHaveLength(5);
+});
+
+test.each([403, 404])("owner read %i throws (fail closed)", async status => {
+  const { ctx } = mockCtx([ok([primary]), { status, statusText: "x", body: "no" }]);
+  await expect(action.execute(input, ctx)).rejects.toThrow(`Cohost ${status}`);
+  const t = mockCtx([ok([primary]), ok({ status: "live" }), { status, statusText: "x", body: "no" }]);
+  await expect(action.execute(input, t.ctx)).rejects.toThrow(`Cohost ${status}`);
+});
+
+test("mappingLabels: event + per-ticket lookups with kind", async () => {
+  const m = { urn: "u", labels: {}, meta: {} };
+  const { ctx, calls } = mockCtx([
+    ok([primary]), ok({ status: "live" }), ok([{ id: "t1" }, { id: "t2" }]), ok({}), ok([]),
+    ok([m]), ok([]), ok([m]),
+  ]);
+  const r = await run({ ...input, mappingLabels: { provider: "flite" } }, ctx);
+  const rms = calls.filter(c => /rms\/urn\/search/.test(c.url)).map(c => new URL(c.url).searchParams);
+  expect(rms.map(p => [p.get("urn"), JSON.parse(p.get("labels")!)])).toEqual([
+    ["urn:1:co_1:cohost-falcon:/events/e1", { provider: "flite", kind: "event" }],
+    ["urn:1:co_1:cohost-falcon:/events/e1/tickets/t1", { provider: "flite", kind: "ticket" }],
+    ["urn:1:co_1:cohost-falcon:/events/e1/tickets/t2", { provider: "flite", kind: "ticket" }],
+  ]);
+  expect(r.mappings).toEqual({ event: [m], tickets: { t1: [], t2: [m] } });
+});
+
+test("no mappingLabels: zero RMS requests even with tickets", async () => {
+  const { ctx, calls } = mockCtx([ok([primary]), ok({ status: "live" }), ok([{ id: "t1" }]), ok({}), ok([])]);
+  const r = await run(input, ctx);
+  expect(calls).toHaveLength(5);
+  expect(calls.filter(c => /rms/.test(c.url))).toHaveLength(0);
+  expect(r.mappings).toEqual({ event: [], tickets: {} });
+});
+
+test("owner tickets requested with status=all; removed ticket kept; channel-only id also looked up once", async () => {
+  const m = { urn: "u", labels: {}, meta: {} };
+  const { ctx, calls } = mockCtx([
+    ok([primary]), ok({ status: "live" }), ok([{ id: "t1", status: "removed" }, { id: "t2", status: "live" }]),
+    ok({}), ok([{ id: "t2" }, { id: "t3" }]),
+    ok([]), ok([m]), ok([]), ok([]),
+  ]);
+  const r = await run({ ...input, mappingLabels: { provider: "flite" } }, ctx);
+  expect(path(calls[2].url)).toBe("/v1/events/e1/tickets?status=all");
+  expect(r.tickets).toEqual([{ id: "t1", status: "removed" }, { id: "t2", status: "live" }]);
+  const urns = calls.filter(c => /rms\/urn\/search/.test(c.url)).map(c => new URL(c.url).searchParams.get("urn"));
+  expect(urns).toEqual([
+    "urn:1:co_1:cohost-falcon:/events/e1",
+    "urn:1:co_1:cohost-falcon:/events/e1/tickets/t1",
+    "urn:1:co_1:cohost-falcon:/events/e1/tickets/t2",
+    "urn:1:co_1:cohost-falcon:/events/e1/tickets/t3",
+  ]);
+  expect(Object.keys(r.mappings.tickets)).toEqual(["t1", "t2", "t3"]);
+});
+
+test("companyId is a hidden param defaulting to the account const (never a field to fill)", () => {
+  const p = action.params!.find(x => x.key === "companyId") as unknown as Record<string, unknown>;
+  expect(p).toMatchObject({ hidden: true, default: "{{ const.account_id }}", required: true });
+});
+
+test("URNs are named under the owner event's company when it reports one", async () => {
+  const { ctx } = mockCtx([ok([primary]), ok({ id: "e1", status: "live", companyId: "co_owner" }), ok([]), ok({}), ok([])]);
+  const r = await run(input, ctx);
+  expect(r.companyId).toBe("co_owner");
+  expect(r.eventUrn).toBe("urn:1:co_owner:cohost-falcon:/events/e1");
+});
+
+test("no companyId anywhere fails instead of naming a URN under an empty company", async () => {
+  const { ctx } = mockCtx([ok([primary]), ok({ id: "e1", status: "live" }), ok([]), ok({}), ok([])]);
+  await expect(run({ channelId: "ch1", eventId: "e1" }, ctx)).rejects.toThrow(/companyId/);
+});

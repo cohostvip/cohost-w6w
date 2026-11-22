@@ -1,5 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
-import { channelPath } from "../lib/channels.ts";
+import { channelIdParam, channelPath, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 import { CHANNEL_LISTED_EVENT_OUTPUT } from "../lib/outputs.ts";
 import type { OutputField } from "../lib/w6w-triggers.ts";
@@ -32,7 +32,7 @@ const listChannelEvents: ActionDefinition<Input> = {
   title: "List Channel Events",
   description: "List the events listed on one of your sales channels.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "status", label: "Event status", type: "string", hint: "Optional, comma-separated, e.g. live,ended." },
     {
       key: "activeAt",
@@ -62,6 +62,8 @@ const listChannelEvents: ActionDefinition<Input> = {
     { key: "offset", label: "Offset", type: "number", default: 0 },
   ],
   output: OUTPUT,
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     ctx.log("info", "listing channel events", { channelId: input.channelId });

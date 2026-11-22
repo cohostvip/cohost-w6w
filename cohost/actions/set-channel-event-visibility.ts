@@ -1,5 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
-import { channelPath } from "../lib/channels.ts";
+import { channelIdParam, channelPath, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 import { resourceId } from "../lib/resource-id.ts";
 
@@ -23,7 +23,7 @@ const setChannelEventVisibility: ActionDefinition<Input> = {
   description: "Show or hide an event on one of your sales channels, without removing it.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true },
     {
       key: "visibility",
@@ -45,6 +45,8 @@ const setChannelEventVisibility: ActionDefinition<Input> = {
     { key: "tags", type: "array", label: "Listing tags" },
     { key: "meta", type: "object", label: "Listing meta" },
   ],
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const eventId = resourceId(input.event, "events");

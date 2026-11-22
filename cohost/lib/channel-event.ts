@@ -12,9 +12,11 @@ export interface ChannelListingRef {
 
 /**
  * GET /events/{eventId} with the `x-cohost-channel-id` header — the event exactly as the channel
- * shows that listing: the channel's name and description for it and its channel prices
- * (`ticketPrices`), not the organizer's own event. Cohost answers 404 when the channel does not
- * show it: not listed there, hidden, or not live.
+ * shows that listing: the channel's name for it and its content blocks (the `description` block
+ * carries the channel's description), not the organizer's own event. No `description`,
+ * `ticketPrices` or `searchTags`: the listing's prices are on its tickets
+ * ({@link fetchChannelEventTickets}). Cohost answers 404 when the channel does not show it: not
+ * listed there, hidden, or not live.
  */
 export function fetchChannelEvent<T = unknown>(ctx: HookContext, ref: ChannelListingRef): Promise<T> {
   return new CohostClient(ctx).request<T>(`/events/${encodeURIComponent(ref.eventId)}`, {

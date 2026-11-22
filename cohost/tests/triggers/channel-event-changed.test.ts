@@ -45,7 +45,7 @@ test("subscribes to every channelEvent.* action by default, or the picked ones",
 });
 
 test("fetches the listing as the channel shows it — channel header, listing id", async () => {
-  const shown = { id: "ev_1", name: "Fest on Channel", ticketPrices: ["USD,2500"] };
+  const shown = { id: "ev_1", name: "Fest on Channel", contentBlocks: [], salesEnabled: true };
   const { ctx, calls } = mockCtx([{ body: { status: "ok", data: shown } }]);
 
   const [out] = await ingest(ping("channelEvent.changed", LISTING, ["tickets.tk_1.costs"]), {}, ctx);

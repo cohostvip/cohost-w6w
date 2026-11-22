@@ -1,4 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
+import { channelIdParam, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 
 interface Input {
@@ -25,7 +26,7 @@ const setChannelListingProperties: ActionDefinition<Input> = {
     "Set the values your sales channel keeps on an event's listing — e.g. the id an integration published it under.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "eventId", label: "Event ID", type: "string", required: true },
     {
       key: "properties",
@@ -49,6 +50,8 @@ const setChannelListingProperties: ActionDefinition<Input> = {
     { key: "slug", type: "string", label: "Listing slug" },
     { key: "properties", type: "object", label: "The listing's properties after the write" },
   ],
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const listingId = input.listingId?.trim() || "primary";
