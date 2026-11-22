@@ -657,3 +657,38 @@ export const OBJECT_CHANGED_SAMPLE = payloadSample(
   { id: ID.ticket },
   ["capacity"],
 );
+
+/**
+ * Channel Changed: one trigger for every object of a sales channel. `action` is the general verb
+ * (`event.change` | `ticket.change`), `type` the object (`channelEvent` | `offering`), and
+ * `meta.change` the fine action. `data` is the channel's listing (event.change) or the ticket
+ * (ticket.change) — null once unlisted/deleted — so it is loosely typed.
+ */
+export const CHANNEL_CHANGED_OUTPUT: OutputField[] = [
+  ...payloadOutput("The channel listing (event.change) or the ticket (ticket.change)", []).map((f) =>
+    f.key === "action"
+      ? { ...f, label: "Action (event.change | ticket.change)", enum: ["event.change", "ticket.change"] }
+      : f.key === "type"
+      ? { ...f, label: "Type (channelEvent | offering)" }
+      : f.key === "id"
+      ? { ...f, label: "Event ID (event.change) or ticket ID (ticket.change)" }
+      : f
+  ),
+  s("meta.channelId", "Channel ID"),
+  s("meta.change", "What happened (listed|changed|unlisted|created|updated|deleted)"),
+  s("meta.ticketId", "Ticket ID (ticket.change only)"),
+  s("meta.listingId", "Listing ID (event.change only)"),
+  o("meta.properties", "Listing properties (event.change only)"),
+];
+export const CHANNEL_CHANGED_SAMPLE = {
+  ...payloadSample(
+    "channelEvent.changed",
+    `/channels/ch_sample/events/${ID.event}/listings/primary`,
+    CHANNEL_EVENT_SAMPLE,
+    [],
+    { channelId: "ch_sample", change: "changed", ticketId: null, listingId: "primary", properties: { eventbriteId: "1234567890" } },
+  ),
+  action: "event.change",
+  type: "channelEvent",
+  id: ID.event,
+};
