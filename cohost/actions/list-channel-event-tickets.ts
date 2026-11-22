@@ -1,4 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
+import { channelIdParam, resolveChannelFields } from "../lib/channels.ts";
 import {
   type ChannelListingRef,
   fetchChannelEventTickets,
@@ -34,7 +35,7 @@ const listChannelEventTickets: ActionDefinition<Input> = {
   title: "List Channel Event Tickets",
   description: "List the tickets your sales channel sells for an event, at the channel's prices.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID, slug or URN)", type: "string", required: true },
     {
       key: "listingId",
@@ -45,6 +46,8 @@ const listChannelEventTickets: ActionDefinition<Input> = {
     },
   ],
   output: OUTPUT,
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const ref: ChannelListingRef = {

@@ -11,6 +11,7 @@
  * `triggers` on `AppDefinition`, and import those from `@w6w/types` instead.
  */
 import type { DynamicOutput, HookContext, OutputField as BaseOutputField, Param } from "@w6w/types";
+import type { ResolveFieldsHook } from "./w6w-fields.ts";
 
 /**
  * `OutputField` with `items` — the fields of ONE element of an array field (keys relative to the
@@ -61,6 +62,13 @@ export interface TriggerDefinition<
   onSubscribe?: OnSubscribeHook<P, S>;
   onUnsubscribe?: OnUnsubscribeHook<P, S>;
   handleIngest: HandleIngestHook<P, S, E>;
+  /**
+   * Fills the trigger's `source: "resolveFields"` params while the user edits the form — the
+   * Action contract of the same name, applied to a trigger's form. Ahead of w6w: the host runs it
+   * for Actions only today (`POST /apps/:id/actions/:key/fields`), so until it runs it for
+   * triggers too those params fall back to free text.
+   */
+  resolveFields?: ResolveFieldsHook;
 }
 
 // deno-lint-ignore no-explicit-any

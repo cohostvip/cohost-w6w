@@ -1,4 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
+import { channelIdParam, resolveChannelFields } from "../lib/channels.ts";
 import {
   type ChannelListingRef,
   fetchChannelEvent,
@@ -24,8 +25,9 @@ interface Input {
 
 /**
  * GET /events/{event} + GET /events/{event}/tickets, both with the `x-cohost-channel-id` header —
- * one listing of an event exactly as your sales channel shows it: the channel's name and
- * description for it, whether ticket sales are on there (`salesEnabled`), and its `tickets` at
+ * one listing of an event exactly as your sales channel shows it: the channel's name for it, its
+ * content blocks (the `description` block carries the channel's description), whether ticket
+ * sales are on there (`salesEnabled`), and its `tickets` at
  * the channel's prices (markup or flat price, plus the channel's fees). What a workflow that
  * mirrors a channel's events elsewhere publishes; Channel Event Changed hands the same event
  * (without `tickets`) as its `data`. Fails when the channel does not show the listing.
@@ -36,9 +38,9 @@ const getChannelEvent: ActionDefinition<Input> = {
   resource: "channel",
   title: "Get Channel Event",
   description:
-    "Fetch an event as your sales channel shows it — its channel name, description, whether sales are on, and its tickets at channel prices.",
+    "Fetch an event as your sales channel shows it — its channel name, content blocks (with the description), whether sales are on, and its tickets at channel prices.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID, slug or URN)", type: "string", required: true },
     {
       key: "listingId",
@@ -49,6 +51,8 @@ const getChannelEvent: ActionDefinition<Input> = {
     },
   ],
   output: OUTPUT,
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const ref: ChannelListingRef = {

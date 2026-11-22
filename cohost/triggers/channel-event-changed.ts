@@ -1,4 +1,5 @@
 import { fetchChannelEvent, isCohostNotFound } from "../lib/channel-event.ts";
+import { channelIdParam, resolveChannelFields } from "../lib/channels.ts";
 import {
   pickValues,
   pingOf,
@@ -66,12 +67,7 @@ const channelEventChanged: TriggerDefinition<Params, ChannelEventPayload, Subscr
   description:
     "Fires when an event is listed on, changes on, or is unlisted from one of your sales channels.",
   params: [
-    {
-      key: "channelId",
-      label: "Channel ID",
-      type: "string",
-      hint: "Only this channel's listings. Leave empty for all of your channels.",
-    },
+    channelIdParam({ hint: "Only this channel's listings. Leave empty for all of your channels." }),
     {
       key: "actions",
       label: "Actions",
@@ -87,6 +83,10 @@ const channelEventChanged: TriggerDefinition<Params, ChannelEventPayload, Subscr
   ],
   output: CHANNEL_EVENT_CHANGED_OUTPUT,
   sample: CHANNEL_EVENT_CHANGED_SAMPLE,
+
+  // The Channel picker. Declared the way an Action declares it; w6w runs it once it serves
+  // trigger forms too (see `TriggerDefinition.resolveFields`).
+  resolveFields: resolveChannelFields,
 
   async onSubscribe({ params, callbackUrl }, ctx) {
     const events = pickValues("actions", params.actions, ACTIONS, DEFAULT_ACTIONS).map((a) => `channelEvent.${a}`);

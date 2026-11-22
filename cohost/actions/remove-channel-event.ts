@@ -1,5 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
-import { channelPath } from "../lib/channels.ts";
+import { channelIdParam, channelPath, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 import { resourceId } from "../lib/resource-id.ts";
 
@@ -21,7 +21,7 @@ const removeChannelEvent: ActionDefinition<Input> = {
   description: "Take an event off one of your sales channels.",
   idempotent: false,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true },
   ],
   output: [
@@ -29,6 +29,8 @@ const removeChannelEvent: ActionDefinition<Input> = {
     { key: "eventId", type: "string", label: "Event ID" },
     { key: "channelId", type: "string", label: "Channel ID" },
   ],
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const eventId = resourceId(input.event, "events");
