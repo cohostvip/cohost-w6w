@@ -74,11 +74,13 @@ cohost/
   channel customization), or it was unlisted (removed, hidden, cancelled or back to
   draft). One delivery per listing — `meta.channelId` + `meta.listingId` say which —
   and `data` is the listing exactly as the channel shows it (`GET /events/{id}?listingId=…`
-  with the channel header: channel name, description, prices and `salesEnabled`); `null`
+  with the channel header: channel name, `contentBlocks` — the `description` block holds
+  the channel's description — and `salesEnabled`; no prices, they are on its tickets); `null`
   once unlisted. Pausing or resuming ticket sales on the channel fires it too, with
   `changedFields` `customization`. Fetch the listing's tickets at channel prices with
   `list-channel-event-tickets`.
-  Optional `channelId` narrows it to one channel. Built for mirroring a channel's
+  Optional `channelId` (a picker of your sales channels — see below) narrows it to one
+  channel. Built for mirroring a channel's
   events to another marketplace (an internal "publish to Eventbrite" channel).
   `meta.properties` carries the values the channel keeps on the listing — the
   properties it declares in its settings, e.g. an `eventbriteId` — so a run knows
@@ -197,6 +199,12 @@ Reads are list-only — the API has no `GET /coupons/{id}`.
 
 ### Sales channels (`resource: channel`)
 
+Every form that takes one of your sales channels — the actions below and the Channel Event
+Changed trigger — shows **Channel** as a picker of your company's channels
+(`GET /company/sales-channels`, via the `resolveFields` hook), and still takes a typed id or an
+expression. The trigger declares the same hook, but w6w runs `resolveFields` for actions only so
+far, so on the trigger the picker reports its options unavailable and you type the id.
+
 | Key | Endpoint |
 | --- | --- |
 | `list-channels` | `GET /company/sales-channels` |
@@ -232,7 +240,9 @@ fires **Channel Event Changed** as `unlisted`; showing it again fires `listed`.
 pending.
 
 `get-channel-event` fetches one listing of an event as your channel shows it. That is the
-channel's name and description for it, and `salesEnabled`, which is `false` while the
+channel's name for it, its `contentBlocks` (the block with designation `description` holds
+the channel's description; the event has no top-level `description`, `ticketPrices` or
+`searchTags` on a channel), and `salesEnabled`, which is `false` while the
 organizer has paused ticket sales on the channel. It also returns `tickets`, each at its
 channel price (the organizer's flat price, price formula or markup, plus the channel's
 fees).
