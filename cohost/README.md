@@ -37,7 +37,8 @@ cohost/
 │   ├── ticket-changed.ts                 # fires on `offering.*`
 │   ├── attendee-changed.ts               # fires on `attendee.*` (one per attendee an order creates)
 │   ├── object-changed.ts                 # general: any picked type × action
-│   └── channel-event-changed.ts          # fires on `channelEvent.*` (one per channel listing)
+│   ├── channel-event-changed.ts          # fires on `channelEvent.*` (one per channel listing)
+│   └── channel-changed.ts                # one trigger for a channel: `event.change` (`channelEvent.*`) + `ticket.change` (`offering.*`, listed events only)
 └── lib/
     ├── client.ts            # thin ctx.fetch wrapper over api.cohost.vip
     ├── params.ts            # shared param / output fragments (pagination, resources)
