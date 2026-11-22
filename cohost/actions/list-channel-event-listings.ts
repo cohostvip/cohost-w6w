@@ -1,5 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
-import { channelPath } from "../lib/channels.ts";
+import { channelIdParam, channelPath, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 import { CHANNEL_LISTING_OUTPUT } from "../lib/outputs.ts";
 import { resourceId } from "../lib/resource-id.ts";
@@ -24,10 +24,12 @@ const listChannelEventListings: ActionDefinition<Input> = {
   title: "List Channel Event Listings",
   description: "List an event's listings on one of your sales channels, with the properties your channel keeps on each.",
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true },
   ],
   output: OUTPUT,
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const eventId = resourceId(input.event, "events");

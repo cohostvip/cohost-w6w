@@ -569,20 +569,29 @@ export const CHANNEL_LISTING_OUTPUT: OutputField[] = [
 
 /**
  * One listing of an event as a sales channel shows it — `GET /events/{id}` with the channel
- * header: the channel's name and description for it, and its prices on the channel.
+ * header: the channel's name for it, its content blocks (the `description` block carries the
+ * channel's description) and whether ticket sales are on. Cohost sends a channel no
+ * `description`, `ticketPrices` or `searchTags`: prices are on the listing's tickets.
  */
 export const CHANNEL_EVENT_OUTPUT: OutputField[] = [
   ...EVENT_OUTPUT,
-  o("description", "Description on the channel"),
-  s("description.html", "Description on the channel (HTML)"),
-  a("ticketPrices", "Ticket prices on the channel (e.g. USD,5500)"),
+  a("contentBlocks", "Content blocks (the \"description\" block holds the description on the channel)"),
   b("salesEnabled", "Ticket sales on (false while the organizer has paused them on the channel)"),
 ];
 export const CHANNEL_EVENT_SAMPLE = {
   ...EVENT_SAMPLE,
   name: "Friday Night Social — on Sample Channel",
-  description: { html: "<p>Live DJs, a welcome drink and a packed room.</p>" },
-  ticketPrices: ["USD,5500"],
+  contentBlocks: [
+    {
+      id: "details",
+      type: "richtext",
+      designation: "description",
+      title: "Details",
+      status: "live",
+      order: 1,
+      data: { content: { html: "<p>Live DJs, a welcome drink and a packed room.</p>" } },
+    },
+  ],
   salesEnabled: true,
 };
 
@@ -608,7 +617,7 @@ export const CHANNEL_TICKET_SAMPLE = {
 
 /**
  * Channel Event Changed: `data` is one listing of the event as the channel shows it (its channel
- * name, description and prices); `meta` names the channel and the listing.
+ * name and content blocks); `meta` names the channel and the listing.
  */
 export const CHANNEL_EVENT_CHANGED_OUTPUT: OutputField[] = [
   ...payloadOutput("The event as the channel shows this listing", CHANNEL_EVENT_OUTPUT).map((f) =>

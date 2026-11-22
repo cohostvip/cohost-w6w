@@ -1,4 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
+import { channelIdParam, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 import { resourceId } from "../lib/resource-id.ts";
 
@@ -46,7 +47,7 @@ const assignPriceFormula: ActionDefinition<Input> = {
   description: "Price an event's tickets on a sales channel by one of your price formulas.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "event", label: "Event (ID or URN)", type: "string", required: true },
     {
       key: "formulaId",
@@ -77,6 +78,8 @@ const assignPriceFormula: ActionDefinition<Input> = {
     { key: "pricing.prices", type: "object", label: "Ticket ID → own channel price" },
     { key: "pricing.markupPercent", type: "number", label: "Markup %" },
   ],
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const eventId = resourceId(input.event.trim(), "events");

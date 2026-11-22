@@ -1,5 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
-import { channelPath } from "../lib/channels.ts";
+import { channelIdParam, channelPath, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 
 interface Input {
@@ -17,11 +17,13 @@ const deleteChannel: ActionDefinition<Input> = {
   title: "Delete Channel",
   description: "Delete one of your sales channels.",
   idempotent: true,
-  params: [{ key: "channelId", label: "Channel ID", type: "string", required: true }],
+  params: [channelIdParam({ required: true })],
   output: [
     { key: "deleted", type: "boolean", label: "Deleted" },
     { key: "id", type: "string", label: "Channel ID" },
   ],
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     ctx.log("info", "deleting channel", { channelId: input.channelId });

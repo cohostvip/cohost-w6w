@@ -1,5 +1,5 @@
 import type { ActionDefinition } from "@w6w/types";
-import { channelPath, DEFAULT_PRICING_PARAMS, defaultPricingOf } from "../lib/channels.ts";
+import { channelIdParam, channelPath, DEFAULT_PRICING_PARAMS, defaultPricingOf, resolveChannelFields } from "../lib/channels.ts";
 import { CohostClient } from "../lib/client.ts";
 import { CHANNEL_OUTPUT } from "../lib/outputs.ts";
 
@@ -29,7 +29,7 @@ const updateChannel: ActionDefinition<Input> = {
   description: "Change one of your sales channels; only the fields you fill in change.",
   idempotent: true,
   params: [
-    { key: "channelId", label: "Channel ID", type: "string", required: true },
+    channelIdParam({ required: true }),
     { key: "name", label: "Name", type: "string" },
     { key: "description", label: "Description", type: "text" },
     {
@@ -62,6 +62,8 @@ const updateChannel: ActionDefinition<Input> = {
     },
   ],
   output: CHANNEL_OUTPUT,
+
+  resolveFields: resolveChannelFields,
 
   async execute(input, ctx) {
     const extra = input.changes && typeof input.changes === "object" && !Array.isArray(input.changes) ? input.changes : {};

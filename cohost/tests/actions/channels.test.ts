@@ -62,7 +62,7 @@ test("the app registers the channel views", () => {
 });
 
 test("gets the event as the channel shows it, with its tickets at channel prices", async () => {
-  const event = { id: "ev_1", name: "Fest on Groov", ticketPrices: ["USD,1100"], salesEnabled: true };
+  const event = { id: "ev_1", name: "Fest on Groov", contentBlocks: [], salesEnabled: true };
   const { ctx, calls } = mockCtx([
     { body: { status: "ok", data: event } },
     { body: { status: "ok", data: channelTickets } },
