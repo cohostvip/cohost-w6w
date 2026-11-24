@@ -126,3 +126,118 @@ test("subscribes only to the webhook families the picked actions need; unsubscri
   expect(calls[0].method).toBe("DELETE");
   expect(new URL(calls[0].url).pathname).toBe("/v1/webhooks/wh_1");
 });
+
+// --- webhook aggregation ---------------------------------------------------------------------
+
+const urnOf = (path: string) => `urn:1:co_1:cohost-falcon:${path}`;
+const agg = (urns: string[], by: "event" | "resource" = "event") => ({
+  count: 5,
+  firstAt: "2026-11-19T00:00:00.000Z",
+  lastAt: "2026-11-19T00:00:30.000Z",
+  by,
+  key: "ev_1",
+  urns,
+});
+const AGG_META = (urns: string[]) => ({ count: 5, firstAt: "2026-11-19T00:00:00.000Z", lastAt: "2026-11-19T00:00:30.000Z", urns });
+const LISTING_VIP = "/channels/ch_1/events/ev_1/listings/vip";
+const LISTING_OTHER = "/channels/ch_2/events/ev_1/listings/primary";
+
+test("subscribe sends the aggregate only when grouping per event", async () => {
+  const body = async (params: Record<string, unknown>) => {
+    const { ctx, calls } = mockCtx([{ status: 201, body: { id: "wh_1" } }]);
+    await channelChanged.onSubscribe!({ params: { channelId: "ch_1", ...params }, ...SUB }, ctx);
+    return JSON.parse(calls[0].body!);
+  };
+  expect(await body({})).not.toHaveProperty("aggregate");
+  expect(await body({ aggregateBy: "none", aggregateSeconds: 30 })).not.toHaveProperty("aggregate");
+  expect((await body({ aggregateBy: "event" })).aggregate).toEqual({ by: "event", windowSeconds: 60 });
+  expect((await body({ aggregateBy: "event", aggregateSeconds: 3600 })).aggregate).toEqual({ by: "event", windowSeconds: 3600 });
+  expect((await body({ aggregateBy: "event", aggregateSeconds: "15" })).aggregate).toEqual({ by: "event", windowSeconds: 15 });
+});
+
+test("aggregateSeconds must be an integer from 1 to 3600 when grouping", async () => {
+  for (const bad of [0, -1, 3601, 1.5, "abc", NaN]) {
+    const { ctx, calls } = mockCtx();
+    await expect(
+      channelChanged.onSubscribe!({ params: { channelId: "ch_1", aggregateBy: "event", aggregateSeconds: bad }, ...SUB }, ctx),
+    ).rejects.toThrow(/aggregateSeconds/);
+    expect(calls).toHaveLength(0);
+  }
+});
+
+test("the grouping params are declared with their defaults", () => {
+  const by = channelChanged.params?.find((p) => p.key === "aggregateBy");
+  expect(by).toMatchObject({ type: "select", default: "none" });
+  expect(by?.options).toEqual([
+    { value: "none", label: "Send every change" },
+    { value: "event", label: "Group changes per event" },
+  ]);
+  expect(channelChanged.params?.find((p) => p.key === "aggregateSeconds")).toMatchObject({ type: "number", default: 60 });
+});
+
+test("an aggregated channelEvent ping: one payload per listing on this channel, others dropped", async () => {
+  const urns = [urnOf(LISTING_VIP), urnOf(LISTING_OTHER), urnOf(LISTING)];
+  const body = ping("channelEvent.changed", LISTING, { changedFields: ["customization"], properties: { k: "v" }, aggregated: agg(urns) });
+  const { ctx, calls } = mockCtx([{ body: { id: "ev_1", n: "primary" } }, { body: { id: "ev_1", n: "vip" } }]);
+  const out = await ingest(body, { channelId: "ch_1" }, ctx);
+  expect(calls).toHaveLength(2);
+  expect(calls.map((c) => new URL(c.url).searchParams.get("listingId"))).toEqual(["primary", "vip"]);
+  expect(calls.every((c) => c.headers["x-cohost-channel-id"] === "ch_1")).toBe(true);
+  expect(out).toHaveLength(2);
+  expect(out[0]).toMatchObject({
+    urn: urnOf(LISTING),
+    action: "event.change",
+    data: { n: "primary" },
+    meta: { listingId: "primary", change: "changed", properties: { k: "v" }, deliveryId: "trg_1", changedFields: ["customization"], aggregated: AGG_META(urns) },
+  });
+  expect(out[1]).toMatchObject({
+    urn: urnOf(LISTING_VIP),
+    action: "event.change",
+    id: "ev_1",
+    data: { n: "vip" },
+    meta: { listingId: "vip", change: "changed", properties: {}, deliveryId: "trg_1", resourcePath: LISTING_VIP, aggregated: AGG_META(urns) },
+  });
+  expect(out[0].meta.aggregated).not.toHaveProperty("by");
+});
+
+test("an aggregated unlisted ping: no fetch for its own listing, the others are fetched", async () => {
+  const urns = [urnOf(LISTING), urnOf(LISTING_VIP)];
+  const body = ping("channelEvent.unlisted", LISTING, { aggregated: agg(urns) });
+  const { ctx, calls } = mockCtx([{ body: { id: "ev_1", n: "vip" } }]);
+  const out = await ingest(body, { channelId: "ch_1" }, ctx);
+  expect(calls).toHaveLength(1);
+  expect(new URL(calls[0].url).searchParams.get("listingId")).toBe("vip");
+  expect(out).toHaveLength(2);
+  expect(out[0]).toMatchObject({ data: null, meta: { listingId: "primary", change: "unlisted" } });
+  expect(out[1]).toMatchObject({ data: { n: "vip" }, meta: { listingId: "vip", change: "changed" } });
+});
+
+test("an aggregated listing the channel no longer shows (404) yields data null", async () => {
+  const body = ping("channelEvent.changed", LISTING, { aggregated: agg([urnOf(LISTING), urnOf(LISTING_VIP)]) });
+  const { ctx } = mockCtx([{ body: { id: "ev_1" } }, { status: 404, body: { error: "nope" } }]);
+  const out = await ingest(body, { channelId: "ch_1" }, ctx);
+  expect(out.map((p) => p.data)).toEqual([{ id: "ev_1" }, null]);
+});
+
+test("an aggregated offering ping: one payload for the latest ticket with meta.aggregated", async () => {
+  const urns = [urnOf("/events/ev_1/tickets/tk_0"), urnOf(TICKET_PATH)];
+  const body = ticketPing("offering.updated");
+  (body.data as Record<string, unknown>).aggregated = agg(urns);
+  const { ctx, calls } = mockCtx([LISTED, TICKET]);
+  const out = await ingest(body, { channelId: "ch_1" }, ctx);
+  expect(calls).toHaveLength(2);
+  expect(out).toHaveLength(1);
+  expect(out[0]).toMatchObject({
+    action: "ticket.change",
+    id: "tk_1",
+    meta: { ticketId: "tk_1", eventId: "ev_1", change: "updated", deliveryId: "trg_1", aggregated: AGG_META(urns) },
+  });
+});
+
+test("an unaggregated ping carries no meta.aggregated", async () => {
+  const listing = await ingest(ping("channelEvent.changed", LISTING), { channelId: "ch_1" }, mockCtx([{ body: { id: "ev_1" } }]).ctx);
+  expect(listing).toHaveLength(1);
+  expect(listing[0].meta).not.toHaveProperty("aggregated");
+  const ticket = await ingest(ticketPing(), { channelId: "ch_1" }, mockCtx([LISTED, TICKET]).ctx);
+  expect(ticket[0].meta).not.toHaveProperty("aggregated");
+});

@@ -13,7 +13,25 @@ export interface WebhookPing {
     changedFields?: string[];
     /** `channelEvent.*` only: the values the channel keeps on the listing (e.g. a synced id). */
     properties?: Record<string, string | number | boolean>;
+    /** Present only on a folded delivery (webhook aggregation): the latest ping stands for the group. */
+    aggregated?: WebhookAggregated;
   };
+}
+
+/** `data.aggregated` of a folded ping. `urns`: the distinct URNs folded, first-seen order, capped at 100. */
+export interface WebhookAggregated {
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  by: "event" | "resource";
+  key: string;
+  urns: string[];
+}
+
+/** Cohost webhook aggregation: fold pings of one group arriving within `windowSeconds` (1-3600) into one. */
+export interface WebhookAggregate {
+  by: "event" | "resource";
+  windowSeconds: number;
 }
 
 /** The ping in a `handleIngest` `raw`: w6w hands the hook the whole inbound call, body included. */
@@ -32,11 +50,12 @@ export async function subscribeWebhook(
   name: string,
   callbackUrl: string,
   events: string[],
+  aggregate?: WebhookAggregate,
 ): Promise<SubscriptionState> {
   const client = new CohostClient(ctx);
   const webhook = await client.request<{ id: string }>("/webhooks", {
     method: "POST",
-    body: { name, url: callbackUrl, events },
+    body: { name, url: callbackUrl, events, ...(aggregate ? { aggregate } : {}) },
   });
   return { webhookId: webhook.id };
 }
