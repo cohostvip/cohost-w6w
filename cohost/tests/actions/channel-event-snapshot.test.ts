@@ -77,26 +77,78 @@ test("¬shown ∧ not started: visibility null, no lookup", async () => {
 });
 
 test.each([403, 404])("owner read %i throws (fail closed)", async status => {
-  const { ctx } = mockCtx([ok([primary]), { status, statusText: "x", body: "no" }]);
-  await expect(action.execute(input, ctx)).rejects.toThrow(`Cohost ${status}`);
-  const t = mockCtx([ok([primary]), ok({ status: "live" }), { status, statusText: "x", body: "no" }]);
-  await expect(action.execute(input, t.ctx)).rejects.toThrow(`Cohost ${status}`);
+  const fail: MockResponse = { status, statusText: "x", body: "no" };
+  const { ctx } = mockCtx([ok([primary]), fail, ok([]), ok({}), ok([])]);
+  await expect(action.execute(input, ctx)).rejects.toThrow(`Cohost ${status} x for GET /v1/events/e1:`);
+  const t = mockCtx([ok([primary]), ok({ status: "live" }), fail, ok({}), ok([])]);
+  await expect(action.execute(input, t.ctx)).rejects.toThrow(`Cohost ${status} x for GET /v1/events/e1/tickets`);
 });
 
-test("mappingLabels: event + per-ticket lookups with kind", async () => {
-  const m = { urn: "u", labels: {}, meta: {} };
+test("the five id-only reads are in flight together, not one after another", async () => {
+  const base = mockCtx([ok([primary]), ok({ status: "live" }), ok([{ id: "t1" }]), ok({}), ok([])]);
+  let inFlight = 0;
+  let most = 0;
+  const ctx = {
+    ...base.ctx,
+    fetch: async (url: RequestInfo | URL, init?: RequestInit) => {
+      const res = base.ctx.fetch(url, init);
+      most = Math.max(most, ++inFlight);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      inFlight--;
+      return res;
+    },
+  } as typeof base.ctx;
+  await run(input, ctx);
+  expect(most).toBe(5);
+});
+
+test("mappingLabels: event + ticket mappings in one search, split by kind", async () => {
+  const ev = { urn: "ue", labels: { provider: "flite", kind: "event" }, meta: {} };
+  const tk = { urn: "ut", labels: { provider: "flite", kind: "ticket" }, meta: {} };
   const { ctx, calls } = mockCtx([
     ok([primary]), ok({ status: "live" }), ok([{ id: "t1" }, { id: "t2" }]), ok({}), ok([]),
-    ok([m]), ok([]), ok([m]),
+    // a counterpart of the wrong kind is not a mapping of that resource
+    ok({ "urn:1:co_1:cohost-falcon:/events/e1": [ev, tk], "urn:1:co_1:cohost-falcon:/events/e1/tickets/t2": [tk, ev] }),
+  ]);
+  // a `kind` in the labels is the snapshot's to set, never sent as a filter
+  const r = await run({ ...input, mappingLabels: { provider: "flite", kind: "x" } }, ctx);
+  const rms = calls.filter(c => /rms\/urn\/search/.test(c.url));
+  expect(rms.map(c => [c.method, JSON.parse(c.body!)])).toEqual([[
+    "POST",
+    {
+      urns: [
+        "urn:1:co_1:cohost-falcon:/events/e1",
+        "urn:1:co_1:cohost-falcon:/events/e1/tickets/t1",
+        "urn:1:co_1:cohost-falcon:/events/e1/tickets/t2",
+      ],
+      labels: { provider: "flite" },
+    },
+  ]]);
+  expect(r.mappings).toEqual({ event: [ev], tickets: { t1: [], t2: [tk] } });
+});
+
+test("a Cohost without the batch search (404): single-URN GETs, still split by kind", async () => {
+  const tk = { urn: "ut", labels: { kind: "ticket" }, meta: {} };
+  const { ctx, calls, logs } = mockCtx([
+    ok([primary]), ok({ status: "live" }), ok([{ id: "t1" }]), ok({}), ok([]),
+    nf, ok([tk]), ok([tk]),
   ]);
   const r = await run({ ...input, mappingLabels: { provider: "flite" } }, ctx);
-  const rms = calls.filter(c => /rms\/urn\/search/.test(c.url)).map(c => new URL(c.url).searchParams);
-  expect(rms.map(p => [p.get("urn"), JSON.parse(p.get("labels")!)])).toEqual([
-    ["urn:1:co_1:cohost-falcon:/events/e1", { provider: "flite", kind: "event" }],
-    ["urn:1:co_1:cohost-falcon:/events/e1/tickets/t1", { provider: "flite", kind: "ticket" }],
-    ["urn:1:co_1:cohost-falcon:/events/e1/tickets/t2", { provider: "flite", kind: "ticket" }],
+  const gets = calls.filter(c => /rms\/urn\/search\?/.test(c.url)).map(c => new URL(c.url).searchParams);
+  expect(gets.map(p => [p.get("urn"), JSON.parse(p.get("labels")!)])).toEqual([
+    ["urn:1:co_1:cohost-falcon:/events/e1", { provider: "flite" }],
+    ["urn:1:co_1:cohost-falcon:/events/e1/tickets/t1", { provider: "flite" }],
   ]);
-  expect(r.mappings).toEqual({ event: [m], tickets: { t1: [], t2: [m] } });
+  expect(r.mappings).toEqual({ event: [], tickets: { t1: [tk] } });
+  expect(logs.some(l => l.level === "warn" && /batch URN search unavailable/.test(l.message))).toBe(true);
+});
+
+test("a batch search failure other than 404 fails the snapshot", async () => {
+  const { ctx } = mockCtx([
+    ok([primary]), ok({ status: "live" }), ok([]), ok({}), ok([]),
+    { status: 500, statusText: "Server Error", body: "boom" },
+  ]);
+  await expect(run({ ...input, mappingLabels: {} }, ctx)).rejects.toThrow("Cohost 500");
 });
 
 test("no mappingLabels: zero RMS requests even with tickets", async () => {
@@ -108,23 +160,25 @@ test("no mappingLabels: zero RMS requests even with tickets", async () => {
 });
 
 test("owner tickets requested with status=all; removed ticket kept; channel-only id also looked up once", async () => {
-  const m = { urn: "u", labels: {}, meta: {} };
+  const m = { urn: "u", labels: { kind: "ticket" }, meta: {} };
   const { ctx, calls } = mockCtx([
     ok([primary]), ok({ status: "live" }), ok([{ id: "t1", status: "removed" }, { id: "t2", status: "live" }]),
     ok({}), ok([{ id: "t2" }, { id: "t3" }]),
-    ok([]), ok([m]), ok([]), ok([]),
+    ok({ "urn:1:co_1:cohost-falcon:/events/e1/tickets/t1": [m] }),
   ]);
   const r = await run({ ...input, mappingLabels: { provider: "flite" } }, ctx);
   expect(path(calls[2].url)).toBe("/v1/events/e1/tickets?status=all");
   expect(r.tickets).toEqual([{ id: "t1", status: "removed" }, { id: "t2", status: "live" }]);
-  const urns = calls.filter(c => /rms\/urn\/search/.test(c.url)).map(c => new URL(c.url).searchParams.get("urn"));
-  expect(urns).toEqual([
+  const rms = calls.filter(c => /rms\/urn\/search/.test(c.url));
+  expect(rms).toHaveLength(1);
+  expect(JSON.parse(rms[0].body!).urns).toEqual([
     "urn:1:co_1:cohost-falcon:/events/e1",
     "urn:1:co_1:cohost-falcon:/events/e1/tickets/t1",
     "urn:1:co_1:cohost-falcon:/events/e1/tickets/t2",
     "urn:1:co_1:cohost-falcon:/events/e1/tickets/t3",
   ]);
   expect(Object.keys(r.mappings.tickets)).toEqual(["t1", "t2", "t3"]);
+  expect(r.mappings.tickets).toEqual({ t1: [m], t2: [], t3: [] }); // the removed ticket's mapping is found
 });
 
 test("companyId is a hidden param defaulting to the account const (never a field to fill)", () => {
@@ -142,4 +196,31 @@ test("URNs are named under the owner event's company when it reports one", async
 test("no companyId anywhere fails instead of naming a URN under an empty company", async () => {
   const { ctx } = mockCtx([ok([primary]), ok({ id: "e1", status: "live" }), ok([]), ok({}), ok([])]);
   await expect(run({ channelId: "ch1", eventId: "e1" }, ctx)).rejects.toThrow(/companyId/);
+});
+
+test("42 tickets, 3 on the channel: every mapping in ONE RMS request (was 43 sequential GETs)", async () => {
+  const owner = Array.from({ length: 42 }, (_, i) => ({ id: `t${i}` }));
+  const urn = (id: string) => `urn:1:co_1:cohost-falcon:/events/e1/tickets/${id}`;
+  const flite = (id: string) => ({ urn: `urn:1:co_1:conn_f:/tickets/${id}`, labels: { provider: "flite", kind: "ticket" }, meta: {} });
+  const fliteEvent = { urn: "urn:1:co_1:conn_f:/events/9", labels: { provider: "flite", kind: "event" }, meta: {} };
+  const { ctx, calls } = mockCtx([
+    ok([primary]), ok({ status: "live" }), ok(owner), ok({}), ok(owner.slice(0, 3)),
+    ok({
+      "urn:1:co_1:cohost-falcon:/events/e1": [fliteEvent],
+      ...Object.fromEntries(["t0", "t1", "t2"].map(id => [urn(id), [flite(id)]])),
+    }),
+  ]);
+  const r = await run({ ...input, mappingLabels: { provider: "flite" } }, ctx);
+  const rms = calls.filter(c => /rms\/urn\/search/.test(c.url));
+  expect(rms).toHaveLength(1);
+  expect(calls).toHaveLength(6);
+  expect(rms[0].method).toBe("POST");
+  expect(JSON.parse(rms[0].body!)).toEqual({
+    urns: ["urn:1:co_1:cohost-falcon:/events/e1", ...owner.map(t => urn(t.id))],
+    labels: { provider: "flite" },
+  });
+  expect(r.mappings.event).toEqual([fliteEvent]);
+  expect(Object.keys(r.mappings.tickets)).toHaveLength(42);
+  expect(r.mappings.tickets.t1).toEqual([flite("t1")]);
+  expect(r.mappings.tickets.t41).toEqual([]);
 });
