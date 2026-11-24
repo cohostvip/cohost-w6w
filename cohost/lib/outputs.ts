@@ -679,6 +679,11 @@ export const CHANNEL_CHANGED_OUTPUT: OutputField[] = [
   s("meta.ticketId", "Ticket ID (ticket.change only)"),
   s("meta.listingId", "Listing ID (event.change only)"),
   o("meta.properties", "Listing properties (event.change only)"),
+  o("meta.aggregated", "Present only when changes are grouped: the folded changes of this delivery"),
+  { key: "meta.aggregated.count", type: "number", label: "Changes folded into this delivery" },
+  s("meta.aggregated.firstAt", "First folded change (ISO time)"),
+  s("meta.aggregated.lastAt", "Last folded change (ISO time)"),
+  { key: "meta.aggregated.urns", type: "array", label: "URNs of the folded changes (distinct, first seen first, max 100)" },
 ];
 export const CHANNEL_CHANGED_SAMPLE = {
   ...payloadSample(
@@ -686,7 +691,18 @@ export const CHANNEL_CHANGED_SAMPLE = {
     `/channels/ch_sample/events/${ID.event}/listings/primary`,
     CHANNEL_EVENT_SAMPLE,
     [],
-    { channelId: "ch_sample", change: "changed", ticketId: null, listingId: "primary", properties: { eventbriteId: "1234567890" } },
+    { channelId: "ch_sample", change: "changed", ticketId: null, listingId: "primary",
+      properties: { eventbriteId: "1234567890" },
+      aggregated: {
+        count: 2,
+        firstAt: "2026-11-01T20:34:10.000Z",
+        lastAt: "2026-11-01T20:34:40.000Z",
+        urns: [
+          `urn:1:${ID.company}:cohost-falcon:/channels/ch_sample/events/${ID.event}/listings/primary`,
+          `urn:1:${ID.company}:cohost-falcon:/channels/ch_sample/events/${ID.event}/listings/vip`,
+        ],
+      },
+    },
   ),
   action: "event.change",
   type: "channelEvent",

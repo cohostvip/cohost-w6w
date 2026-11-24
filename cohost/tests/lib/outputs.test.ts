@@ -85,6 +85,7 @@ test("every trigger declares the same envelope: urn, action, type, id, timestamp
       .filter(
         (k) =>
           !k.startsWith("data.") &&
+          !k.startsWith("meta.aggregated") &&
           !["meta.transactions", "meta.channelId", "meta.listingId", "meta.properties", "meta.change", "meta.ticketId"].includes(k),
       )
       .sort();
