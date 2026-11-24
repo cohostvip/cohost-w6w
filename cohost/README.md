@@ -87,6 +87,17 @@ cohost/
   properties it declares in its settings, e.g. an `eventbriteId` — so a run knows
   whether to create or update the copy elsewhere (on `unlisted`, the values the
   listing had). Write them back with `set-channel-listing-properties`.
+- **Channel Changed** — one trigger for a sales channel: `event.change` (an event is
+  listed, changed or unlisted on the channel) and `ticket.change` (a ticket of an event
+  listed on the channel changes). **Grouping** (`aggregateBy` = *Group changes per event*,
+  window `aggregateSeconds`, 1-3600, default 60) turns a burst — a bulk update of 71
+  tickets — into one run per event: Cohost folds the pings of one event arriving within
+  the window into one delivery, sent when the window closes. A folded delivery carries
+  `meta.aggregated` (`count`, `firstAt`, `lastAt`, `urns` — the distinct URNs folded,
+  capped at 100). `event.change` emits one payload per distinct listing of this channel
+  among them (the latest as usual; the others re-fetched, `meta.change` `changed`);
+  `ticket.change` emits ONE payload, the latest ticket — read `meta.aggregated.urns` for
+  every ticket changed. Off by default (*Send every change*): every change is its own run.
 
 `*.changed` events are never subscribed by the change triggers: Cohost fires one with
 every `*.updated`, so they would deliver each update twice.
