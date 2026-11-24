@@ -105,11 +105,11 @@ var tenant_default = tenant;
 function pingOf(raw) {
   return raw.body;
 }
-async function subscribeWebhook(ctx, name, callbackUrl, events) {
+async function subscribeWebhook(ctx, name, callbackUrl, events, aggregate) {
   const client = new CohostClient(ctx);
   const webhook = await client.request("/webhooks", {
     method: "POST",
-    body: { name, url: callbackUrl, events }
+    body: { name, url: callbackUrl, events, ...aggregate ? { aggregate } : {} }
   });
   return { webhookId: webhook.id };
 }
@@ -678,7 +678,12 @@ var CHANNEL_CHANGED_OUTPUT = [
   s("meta.change", "What happened (listed|changed|unlisted|created|updated|deleted)"),
   s("meta.ticketId", "Ticket ID (ticket.change only)"),
   s("meta.listingId", "Listing ID (event.change only)"),
-  o("meta.properties", "Listing properties (event.change only)")
+  o("meta.properties", "Listing properties (event.change only)"),
+  o("meta.aggregated", "Present only when changes are grouped: the folded changes of this delivery"),
+  { key: "meta.aggregated.count", type: "number", label: "Changes folded into this delivery" },
+  s("meta.aggregated.firstAt", "First folded change (ISO time)"),
+  s("meta.aggregated.lastAt", "Last folded change (ISO time)"),
+  { key: "meta.aggregated.urns", type: "array", label: "URNs of the folded changes (distinct, first seen first, max 100)" }
 ];
 var CHANNEL_CHANGED_SAMPLE = {
   ...payloadSample(
@@ -686,7 +691,22 @@ var CHANNEL_CHANGED_SAMPLE = {
     `/channels/ch_sample/events/${ID.event}/listings/primary`,
     CHANNEL_EVENT_SAMPLE,
     [],
-    { channelId: "ch_sample", change: "changed", ticketId: null, listingId: "primary", properties: { eventbriteId: "1234567890" } }
+    {
+      channelId: "ch_sample",
+      change: "changed",
+      ticketId: null,
+      listingId: "primary",
+      properties: { eventbriteId: "1234567890" },
+      aggregated: {
+        count: 2,
+        firstAt: "2026-11-01T20:34:10.000Z",
+        lastAt: "2026-11-01T20:34:40.000Z",
+        urns: [
+          `urn:1:${ID.company}:cohost-falcon:/channels/ch_sample/events/${ID.event}/listings/primary`,
+          `urn:1:${ID.company}:cohost-falcon:/channels/ch_sample/events/${ID.event}/listings/vip`
+        ]
+      }
+    }
   ),
   action: "event.change",
   type: "channelEvent",
@@ -1035,6 +1055,25 @@ var channel_event_changed_default = channelEventChanged;
 
 // triggers/channel-changed.ts
 var ACTIONS4 = ["event.change", "ticket.change"];
+var DEFAULT_AGGREGATE_SECONDS = 60;
+function aggregateWindow(value) {
+  if (value === void 0 || value === null || value === "") return DEFAULT_AGGREGATE_SECONDS;
+  const n2 = typeof value === "string" ? Number(value.trim()) : value;
+  if (typeof n2 !== "number" || !Number.isInteger(n2) || n2 < 1 || n2 > 3600) {
+    throw new Error(`aggregateSeconds: must be a whole number of seconds from 1 to 3600, got ${JSON.stringify(value)}`);
+  }
+  return n2;
+}
+function resourcePathOfUrn(urn) {
+  if (typeof urn !== "string") return null;
+  const parts = urn.split(":");
+  if (parts[0] !== "urn" || parts.length < 5) return null;
+  return parts.slice(4).join(":");
+}
+function aggregatedMeta(agg) {
+  if (!agg) return void 0;
+  return { count: agg.count, firstAt: agg.firstAt, lastAt: agg.lastAt, urns: agg.urns };
+}
 function eventIdOf(resourcePath) {
   const [events, eventId] = resourcePath.split("/").filter(Boolean);
   if (events !== "events" || !eventId) return null;
@@ -1047,7 +1086,7 @@ function eventIdOf(resourcePath) {
 var channelChanged = {
   key: "channel-changed",
   title: "Channel Changed",
-  description: "Fires when something changes on one of your sales channels: an event is listed, changed or unlisted (event.change), or a ticket of a listed event changes (ticket.change).",
+  description: "Fires when something changes on one of your sales channels: an event is listed, changed or unlisted (event.change), or a ticket of a listed event changes (ticket.change). Optionally group a burst of changes (e.g. a bulk ticket update) into one run per event.",
   params: [
     channelIdParam({ required: true, hint: "Only changes on this channel." }),
     {
@@ -1060,6 +1099,25 @@ var channelChanged = {
         { value: "event.change", label: "Event change" },
         { value: "ticket.change", label: "Ticket change" }
       ]
+    },
+    {
+      key: "aggregateBy",
+      label: "Grouping",
+      type: "select",
+      default: "none",
+      hint: "Group changes to cut a burst (a bulk update) down to one run per event.",
+      options: [
+        { value: "none", label: "Send every change" },
+        { value: "event", label: "Group changes per event" }
+      ]
+    },
+    {
+      key: "aggregateSeconds",
+      label: "Grouping window (seconds)",
+      type: "number",
+      default: DEFAULT_AGGREGATE_SECONDS,
+      hint: "Applies only when grouping per event: wait this long after the first change, then send one run. 1-3600.",
+      validation: { integer: true, min: 1, max: 3600 }
     }
   ],
   output: CHANNEL_CHANGED_OUTPUT,
@@ -1074,7 +1132,8 @@ var channelChanged = {
       ...picked.includes("event.change") ? ["listed", "changed", "unlisted"].map((a2) => `channelEvent.${a2}`) : [],
       ...picked.includes("ticket.change") ? ["created", "updated", "deleted"].map((a2) => `offering.${a2}`) : []
     ];
-    return subscribeWebhook(ctx, "w6w: channel changed", callbackUrl, events);
+    const aggregate = params.aggregateBy === "event" ? { by: "event", windowSeconds: aggregateWindow(params.aggregateSeconds) } : void 0;
+    return subscribeWebhook(ctx, "w6w: channel changed", callbackUrl, events, aggregate);
   },
   onUnsubscribe({ state }, ctx) {
     return unsubscribeWebhook(ctx, state);
@@ -1085,35 +1144,51 @@ var channelChanged = {
     const ping = pingOf(raw);
     const change = ping.action.slice(ping.action.indexOf(".") + 1);
     if (ping.action.startsWith("channelEvent.")) {
-      const listing = parseListingPath(ping.context.resourcePath);
-      if (!listing || listing.channelId !== channelId) return [];
-      let data = null;
-      if (ping.action !== "channelEvent.unlisted") {
-        try {
-          data = await fetchChannelEvent(ctx, listing);
-        } catch (error) {
-          if (!isCohostNotFound(error)) throw error;
+      const aggregated = aggregatedMeta(ping.data?.aggregated);
+      const seen = /* @__PURE__ */ new Set();
+      const listings = [];
+      const add = (urn, resourcePath, latest) => {
+        const listing = resourcePath ? parseListingPath(resourcePath) : null;
+        if (!listing || !resourcePath || listing.channelId !== channelId) return;
+        const key = `${listing.eventId}/${listing.listingId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        listings.push({ listing, urn, resourcePath, latest });
+      };
+      add(ping.urn, ping.context.resourcePath, true);
+      for (const urn of ping.data?.aggregated?.urns ?? []) add(urn, resourcePathOfUrn(urn), false);
+      const out = [];
+      for (const { listing, urn, resourcePath, latest } of listings) {
+        let data = null;
+        if (!latest || ping.action !== "channelEvent.unlisted") {
+          try {
+            data = await fetchChannelEvent(ctx, listing);
+          } catch (error) {
+            if (!isCohostNotFound(error)) throw error;
+          }
         }
+        out.push({
+          urn,
+          action: "event.change",
+          type: "channelEvent",
+          id: listing.eventId,
+          timestamp: ping.timestamp,
+          data: data ?? null,
+          meta: {
+            changedFields: ping.data?.changedFields ?? [],
+            companyId: ping.context.companyId,
+            eventId: listing.eventId,
+            resourcePath,
+            deliveryId: ping.id,
+            channelId,
+            change: latest ? change : "changed",
+            listingId: listing.listingId,
+            properties: latest ? ping.data?.properties ?? {} : {},
+            ...aggregated ? { aggregated } : {}
+          }
+        });
       }
-      return [{
-        urn: ping.urn,
-        action: "event.change",
-        type: "channelEvent",
-        id: listing.eventId,
-        timestamp: ping.timestamp,
-        data: data ?? null,
-        meta: {
-          changedFields: ping.data?.changedFields ?? [],
-          companyId: ping.context.companyId,
-          eventId: listing.eventId,
-          resourcePath: ping.context.resourcePath,
-          deliveryId: ping.id,
-          channelId,
-          change,
-          listingId: listing.listingId,
-          properties: ping.data?.properties ?? {}
-        }
-      }];
+      return out;
     }
     if (ping.action.startsWith("offering.")) {
       const eventId = eventIdOf(ping.context.resourcePath);
@@ -1131,7 +1206,14 @@ var channelChanged = {
       return [{
         ...payload,
         action: "ticket.change",
-        meta: { ...payload.meta, channelId, eventId, change, ticketId: payload.id }
+        meta: {
+          ...payload.meta,
+          channelId,
+          eventId,
+          change,
+          ticketId: payload.id,
+          ...ping.data?.aggregated ? { aggregated: aggregatedMeta(ping.data.aggregated) } : {}
+        }
       }];
     }
     return [];
