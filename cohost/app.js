@@ -2515,72 +2515,37 @@ var getChannelEvent = {
 };
 var get_channel_event_default = getChannelEvent;
 
-// actions/find-mapped-resources.ts
-var RESOURCE_FIELDS = [
-  { key: "urn", type: "string", label: "URN" },
-  { key: "labels", type: "object", label: "Labels" },
-  { key: "labels.id", type: "string", label: "Provider ID" },
-  { key: "labels.name", type: "string", label: "Name" },
-  { key: "labels.source", type: "string", label: "Source (eventbrite, \u2026)" },
-  { key: "labels.category", type: "string", label: "Category (ticket, event, \u2026)" },
-  { key: "labels.eventId", type: "string", label: "Provider event ID" },
-  { key: "meta", type: "object", label: "Meta" },
-  { key: "meta.implementation", type: "object", label: "Connection app" },
-  { key: "meta.implementation.id", type: "string", label: "Connection app ID (eventbrite@1.0.0, \u2026)" },
-  { key: "meta.implementation.name", type: "string", label: "Connection app name" }
-];
-var OUTPUT6 = [{ key: "results", type: "array", label: "Mapped resources", items: RESOURCE_FIELDS }];
-var findMappedResources = {
-  key: "find-mapped-resources",
-  type: "read",
-  resource: "urn",
-  title: "Find Mapped Resources",
-  description: "List every resource mapped to a Cohost URN, e.g. the Eventbrite ticket classes linked to a ticket.",
-  params: [
-    {
-      key: "urn",
-      label: "URN",
-      type: "string",
-      required: true,
-      hint: "e.g. urn:1:<company>:cohost-falcon:/events/<eventId>/tickets/<ticketId> \u2014 a change trigger's urn."
-    },
-    {
-      key: "labels",
-      label: "Label filters",
-      type: "json",
-      required: false,
-      hint: "Optional JSON object with any label keys and values to match on mapped resources. All supplied labels must match; extra stored labels are allowed. Leave empty for no label filtering."
-    }
-  ],
-  output: OUTPUT6,
-  sample: {
-    results: [
-      {
-        urn: "urn:1:co_sample:conn_sample:/events/1000000001/ticket_classes/1000000005",
-        labels: {
-          id: "1000000005",
-          name: "General Admission",
-          source: "eventbrite",
-          category: "ticket",
-          eventId: "1000000001",
-          "-resource.connectionId": "conn_sample"
-        },
-        meta: {
-          implementation: { id: "eventbrite@1.0.0", name: "Eventbrite" }
-        }
+// lib/rms.ts
+var SEARCH_BATCH = 200;
+var FALLBACK_CONCURRENCY = 8;
+async function searchMappedResources(ctx, urns, labels) {
+  const unique = [...new Set(urns)];
+  if (!unique.length) return {};
+  const client = new CohostClient(ctx);
+  const found = {};
+  try {
+    const chunks = [];
+    for (let i = 0; i < unique.length; i += SEARCH_BATCH) chunks.push(unique.slice(i, i + SEARCH_BATCH));
+    const parts = await Promise.all(chunks.map(
+      (chunk) => client.request("/rms/urn/search", { method: "POST", body: { urns: chunk, labels } })
+    ));
+    for (const part of parts) Object.assign(found, part ?? {});
+  } catch (error) {
+    if (!isCohostNotFound(error)) throw error;
+    ctx.log("warn", "batch URN search unavailable; searching one URN at a time", { urns: unique.length });
+    let next = 0;
+    const worker = async () => {
+      while (next < unique.length) {
+        const urn = unique[next++];
+        found[urn] = await client.request("/rms/urn/search", {
+          query: { urn, labels: labels === void 0 ? void 0 : JSON.stringify(labels) }
+        });
       }
-    ]
-  },
-  async execute(input, ctx) {
-    ctx.log("info", "finding mapped resources", { urn: input.urn });
-    const client = new CohostClient(ctx);
-    const results = await client.request("/rms/urn/search", {
-      query: { urn: input.urn, labels: input.labels === void 0 ? void 0 : JSON.stringify(input.labels) }
-    });
-    return { results };
+    };
+    await Promise.all(Array.from({ length: Math.min(FALLBACK_CONCURRENCY, unique.length) }, worker));
   }
-};
-var find_mapped_resources_default = findMappedResources;
+  return Object.fromEntries(unique.map((urn) => [urn, Array.isArray(found[urn]) ? found[urn] : []]));
+}
 
 // actions/get-channel-event-snapshot.ts
 var PAGE = 100;
@@ -2609,6 +2574,18 @@ async function lookupVisibility(ctx, channelId, eventId) {
     const total = typeof p.total === "number" ? p.total : p.pagination?.total;
     if (items.length < PAGE || typeof total === "number" && offset + PAGE >= total) return null;
   }
+}
+async function readMappings(ctx, eventUrn, ticketIds2, mappingLabels) {
+  if (!mappingLabels) return { event: [], tickets: {} };
+  const { kind: _kind, ...labels } = mappingLabels;
+  const ids = [...new Set(ticketIds2)];
+  const ticketUrn = (id) => `${eventUrn}/tickets/${id}`;
+  const found = await searchMappedResources(ctx, [eventUrn, ...ids.map(ticketUrn)], labels);
+  const ofKind = (urn, kind) => (found[urn] ?? []).filter((r) => r.labels?.kind === kind);
+  return {
+    event: ofKind(eventUrn, "event"),
+    tickets: Object.fromEntries(ids.map((id) => [id, ofKind(ticketUrn(id), "ticket")]))
+  };
 }
 var getChannelEventSnapshot = {
   key: "get-channel-event-snapshot",
@@ -2648,43 +2625,33 @@ var getChannelEventSnapshot = {
     const eventId = input.eventId.trim();
     const client = new CohostClient(ctx);
     ctx.log("info", "reading channel event snapshot", { channelId, eventId });
-    const listings = await client.request(channelPath(channelId, "events", eventId, "listings"));
     const wanted = input.listingId?.trim();
+    const ref = { channelId, eventId, listingId: wanted };
+    const eventPath = `/events/${encodeURIComponent(eventId)}`;
+    const [listings, event, tickets, view] = await Promise.all([
+      client.request(channelPath(channelId, "events", eventId, "listings")),
+      client.request(eventPath),
+      // default is live only; removed/hidden/sold-out tickets must reach the snapshot
+      client.request(`${eventPath}/tickets`, { query: { status: "all" } }),
+      Promise.all([fetchChannelEvent(ctx, ref), fetchChannelEventTickets(ctx, ref)]).then(
+        ([channelEvent2, channelTickets2]) => ({ shown: true, channelEvent: channelEvent2, channelTickets: channelTickets2 }),
+        (error) => {
+          if (!isCohostNotFound(error)) throw error;
+          return { shown: false, channelEvent: null, channelTickets: [] };
+        }
+      )
+    ]);
     const all = Array.isArray(listings) ? listings : [];
     const listing = (wanted ? all.find((l) => l.listingId === wanted) : void 0) ?? all.find((l) => l.listingId === "primary") ?? null;
-    const event = await client.request(`/events/${encodeURIComponent(eventId)}`);
+    const { shown, channelEvent, channelTickets } = view;
     const owner = typeof event.companyId === "string" && event.companyId.trim() ? event.companyId.trim() : void 0;
     const companyId = owner ?? (typeof input.companyId === "string" ? input.companyId.trim() : "");
     if (!companyId) throw new Error("companyId is required (the account's company) when the event reports none");
     const eventUrn = `urn:1:${companyId}:cohost-falcon:/events/${eventId}`;
-    const tickets = await client.request(`/events/${encodeURIComponent(eventId)}/tickets`, {
-      query: { status: "all" }
-      // default is live only; removed/hidden/sold-out tickets must reach the snapshot
-    });
-    let shown = true;
-    let channelEvent = null;
-    let channelTickets = [];
-    const ref = { channelId, eventId, listingId: wanted };
-    try {
-      const [ce, ct] = await Promise.all([fetchChannelEvent(ctx, ref), fetchChannelEventTickets(ctx, ref)]);
-      channelEvent = ce;
-      channelTickets = ct;
-    } catch (error) {
-      if (!isCohostNotFound(error)) throw error;
-      shown = false;
-    }
-    let visibility = null;
-    if (shown) visibility = "visible";
-    else if (event.status === "started") visibility = await lookupVisibility(ctx, channelId, eventId);
-    const mappings = { event: [], tickets: {} };
-    if (input.mappingLabels) {
-      const look = async (urn, kind) => (await find_mapped_resources_default.execute({ urn, labels: { ...input.mappingLabels, kind } }, ctx)).results;
-      mappings.event = await look(eventUrn, "event");
-      const ids = new Set([...tickets, ...channelTickets].map((t) => String(t.id)));
-      for (const id of ids) {
-        mappings.tickets[id] = await look(`${eventUrn}/tickets/${id}`, "ticket");
-      }
-    }
+    const [mappings, visibility] = await Promise.all([
+      readMappings(ctx, eventUrn, [...tickets, ...channelTickets].map((t) => String(t.id)), input.mappingLabels),
+      shown ? "visible" : event.status === "started" ? lookupVisibility(ctx, channelId, eventId) : null
+    ]);
     return { channelId, eventId, companyId, eventUrn, listing, visibility, shown, channelEvent, channelTickets, event, tickets, mappings };
   }
 };
@@ -2789,7 +2756,7 @@ var registerUrnMappings = {
 var register_urn_mappings_default = registerUrnMappings;
 
 // actions/list-channel-event-tickets.ts
-var OUTPUT7 = [
+var OUTPUT6 = [
   { key: "results", type: "array", label: "Tickets on the channel", items: CHANNEL_TICKET_OUTPUT }
 ];
 var listChannelEventTickets = {
@@ -2809,7 +2776,7 @@ var listChannelEventTickets = {
       hint: "primary, or an extra listing's id (meta.listingId on Channel Event Changed)."
     }
   ],
-  output: OUTPUT7,
+  output: OUTPUT6,
   resolveFields: resolveChannelFields,
   async execute(input, ctx) {
     const ref = {
@@ -3408,6 +3375,73 @@ var listUsers = {
   }
 };
 var list_users_default = listUsers;
+
+// actions/find-mapped-resources.ts
+var RESOURCE_FIELDS = [
+  { key: "urn", type: "string", label: "URN" },
+  { key: "labels", type: "object", label: "Labels" },
+  { key: "labels.id", type: "string", label: "Provider ID" },
+  { key: "labels.name", type: "string", label: "Name" },
+  { key: "labels.source", type: "string", label: "Source (eventbrite, \u2026)" },
+  { key: "labels.category", type: "string", label: "Category (ticket, event, \u2026)" },
+  { key: "labels.eventId", type: "string", label: "Provider event ID" },
+  { key: "meta", type: "object", label: "Meta" },
+  { key: "meta.implementation", type: "object", label: "Connection app" },
+  { key: "meta.implementation.id", type: "string", label: "Connection app ID (eventbrite@1.0.0, \u2026)" },
+  { key: "meta.implementation.name", type: "string", label: "Connection app name" }
+];
+var OUTPUT7 = [{ key: "results", type: "array", label: "Mapped resources", items: RESOURCE_FIELDS }];
+var findMappedResources = {
+  key: "find-mapped-resources",
+  type: "read",
+  resource: "urn",
+  title: "Find Mapped Resources",
+  description: "List every resource mapped to a Cohost URN, e.g. the Eventbrite ticket classes linked to a ticket.",
+  params: [
+    {
+      key: "urn",
+      label: "URN",
+      type: "string",
+      required: true,
+      hint: "e.g. urn:1:<company>:cohost-falcon:/events/<eventId>/tickets/<ticketId> \u2014 a change trigger's urn."
+    },
+    {
+      key: "labels",
+      label: "Label filters",
+      type: "json",
+      required: false,
+      hint: "Optional JSON object with any label keys and values to match on mapped resources. All supplied labels must match; extra stored labels are allowed. Leave empty for no label filtering."
+    }
+  ],
+  output: OUTPUT7,
+  sample: {
+    results: [
+      {
+        urn: "urn:1:co_sample:conn_sample:/events/1000000001/ticket_classes/1000000005",
+        labels: {
+          id: "1000000005",
+          name: "General Admission",
+          source: "eventbrite",
+          category: "ticket",
+          eventId: "1000000001",
+          "-resource.connectionId": "conn_sample"
+        },
+        meta: {
+          implementation: { id: "eventbrite@1.0.0", name: "Eventbrite" }
+        }
+      }
+    ]
+  },
+  async execute(input, ctx) {
+    ctx.log("info", "finding mapped resources", { urn: input.urn });
+    const client = new CohostClient(ctx);
+    const results = await client.request("/rms/urn/search", {
+      query: { urn: input.urn, labels: input.labels === void 0 ? void 0 : JSON.stringify(input.labels) }
+    });
+    return { results };
+  }
+};
+var find_mapped_resources_default = findMappedResources;
 
 // actions/resolve-urn.ts
 var OUTPUT8 = [
